@@ -9,4 +9,3 @@ dont-crash-on-null-job.patch
 handle-inactive-vfs.patch
 ref-jobs-in-thread.patch
 build_old_libgphoto.patch
-70_fix_autoreconf_m4.patch

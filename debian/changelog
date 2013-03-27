@@ -1,3 +1,33 @@
+gvfs (1.16.0-1blankon1) suroboyo; urgency=low
+
+  * New upstream release
+
+ -- Mahyuddin Idram Ahmad <dotovr@di.blankon.in>  Wed, 27 Mar 2013 15:00:02 +0700
+
+gvfs (1.16.0-1) experimental; urgency=low
+
+  [ Emilio Pozuelo Monfort ]
+  * New upstream release.
+    + debian/patches/70_fix_autoreconf_m4.patch:
+      - Removed, no longer needed as upstream now ships the m4
+        directory in the tarballs.
+
+  [ Martin Pitt ]
+  * Add autopkgtest, calling upstream integration test suite.
+  * Version libmtp-dev build dependency according to configure.ac.
+
+ -- Emilio Pozuelo Monfort <pochu@debian.org>  Tue, 26 Mar 2013 11:10:28 +0100
+
+gvfs (1.15.4-2) experimental; urgency=low
+
+  * Brown paper bag release.
+  * debian/gvfs-backends.install,
+    debian/control.in:
+    + Actually ship the MTP backend. Closes: #703135.
+
+ -- Emilio Pozuelo Monfort <pochu@debian.org>  Sat, 16 Mar 2013 13:29:44 +0100
+
+
 gvfs (1.15.4-1blankon1) suroboyo; urgency=low
 
   * New upstream release
