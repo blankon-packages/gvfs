@@ -1,11 +1,9 @@
 Description: make sure to keep a ref to jobs while they run in a thread
 Origin: vendor, Ubuntu
 
-Index: gvfs-1.13.4/daemon/gvfsdaemon.c
-===================================================================
---- gvfs-1.13.4.orig/daemon/gvfsdaemon.c	2012-07-31 17:12:28.000000000 +0200
-+++ gvfs-1.13.4/daemon/gvfsdaemon.c	2012-08-02 10:10:13.133604023 +0200
-@@ -182,6 +182,7 @@
+--- a/daemon/gvfsdaemon.c
++++ b/daemon/gvfsdaemon.c
+@@ -198,6 +198,7 @@
    GVfsJob *job = G_VFS_JOB (data);
  
    g_vfs_job_run (job);
@@ -13,7 +11,7 @@ Index: gvfs-1.13.4/daemon/gvfsdaemon.c
  }
  
  static void
-@@ -574,7 +575,8 @@
+@@ -590,7 +591,8 @@
    if (!g_vfs_job_try (job))
      {
        /* Couldn't finish / run async, queue worker thread */
@@ -23,7 +21,7 @@ Index: gvfs-1.13.4/daemon/gvfsdaemon.c
      }
  }
  
-@@ -1025,7 +1027,8 @@
+@@ -1057,7 +1059,8 @@
  g_vfs_daemon_run_job_in_thread (GVfsDaemon *daemon,
  				GVfsJob    *job)
  {
@@ -33,11 +31,9 @@ Index: gvfs-1.13.4/daemon/gvfsdaemon.c
  }
  
  void
-Index: gvfs-1.13.4/daemon/gvfschannel.c
-===================================================================
---- gvfs-1.13.4.orig/daemon/gvfschannel.c	2012-08-02 10:10:09.797604049 +0200
-+++ gvfs-1.13.4/daemon/gvfschannel.c	2012-08-02 10:10:13.133604023 +0200
-@@ -642,6 +642,7 @@
+--- a/daemon/gvfschannel.c
++++ b/daemon/gvfschannel.c
+@@ -640,6 +640,7 @@
      }
  
    g_object_unref (job);
@@ -45,7 +41,7 @@ Index: gvfs-1.13.4/daemon/gvfschannel.c
  }
  
  /* Might be called on an i/o thread */
-@@ -665,7 +666,7 @@
+@@ -663,7 +664,7 @@
  				   channel->priv->reply_buffer,
  				   G_VFS_DAEMON_SOCKET_PROTOCOL_REPLY_SIZE,
  				   0, NULL,
@@ -54,7 +50,7 @@ Index: gvfs-1.13.4/daemon/gvfschannel.c
      }
    else
      {
-@@ -674,7 +675,7 @@
+@@ -672,7 +673,7 @@
  				   channel->priv->output_data,
  				   channel->priv->output_data_size,
  				   0, NULL,

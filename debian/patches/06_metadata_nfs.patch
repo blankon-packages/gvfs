@@ -8,9 +8,9 @@
  #include <locale.h>
  #include <stdlib.h>
  #include "metatree.h"
-@@ -431,6 +432,34 @@
+@@ -468,6 +469,34 @@
+   g_main_loop_quit (loop);
  }
- 
  
 +static gboolean
 +home_is_remote (void)
@@ -43,7 +43,7 @@
  int
  main (int argc, char *argv[])
  {
-@@ -479,6 +508,12 @@
+@@ -516,6 +545,12 @@
  
    g_option_context_free (context);
  

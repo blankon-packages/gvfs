@@ -9,7 +9,7 @@ Subject: [PATCH] Nuke the metadata file if magic blob is wrong
 
 --- a/metadata/metatree.c
 +++ b/metadata/metatree.c
-@@ -477,7 +477,17 @@
+@@ -397,7 +397,17 @@
    tree->header = (MetaFileHeader *)data;
  
    if (memcmp (tree->header->magic, MAGIC, MAGIC_LEN) != 0)

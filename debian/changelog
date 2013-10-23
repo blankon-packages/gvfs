@@ -1,3 +1,91 @@
+gvfs (1.18.2-1blankon1) suroboyo; urgency=low
+
+  * New upstream release
+
+ -- Mahyuddin Idram Ahmad <dotovr@di.blankon.in>  Wed, 23 Oct 2013 20:57:40 +0700
+
+gvfs (1.18.2-1) experimental; urgency=low
+
+  * New upstream release.
+  * Update build-dependencies according to configure.ac:
+    - Bump libglib2.0-dev to >= 2.37.0
+    - Bump libmtp-dev to >= 1.1.6
+    - Bump libimobiledevice-dev to >= 1.1.5
+  * Make debian/patches/05_shared_libdaemon.patch apply
+  * Refresh patches:
+    - debian/patches/ref-jobs-in-thread.patch
+    - debian/patches/build_old_libgphoto.patch
+    - debian/patches/handle-inactive-vfs.patch
+  * Drop debian/patches/00git_testsuite_fixes.patch
+  * debian/gvfs-common.install:
+    - install usr/lib/tmpfiles.d/gvfsd-fuse-tmpfiles.conf
+
+ -- Andreas Henriksson <andreas@fatal.se>  Thu, 17 Oct 2013 21:49:06 +0200
+
+gvfs (1.16.3-1) unstable; urgency=low
+
+  * New upstream release.
+
+ -- Michael Biebl <biebl@debian.org>  Sat, 29 Jun 2013 09:34:48 +0200
+
+gvfs (1.16.2-5) unstable; urgency=low
+
+  * debian/gvfs-backends.install,
+    debian/rules:
+    + Likewise for mtp.
+
+ -- Emilio Pozuelo Monfort <pochu@debian.org>  Fri, 21 Jun 2013 12:48:41 +0200
+
+gvfs (1.16.2-4) unstable; urgency=low
+
+  * debian/gvfs-backends.install,
+    debian/rules:
+    + Install the cdda backend only on linux as it needs gudev or hal.
+  * debian/control.in:
+    + Standards-Version is 3.9.4. No changes needed.
+
+ -- Emilio Pozuelo Monfort <pochu@debian.org>  Fri, 21 Jun 2013 09:36:59 +0200
+
+gvfs (1.16.2-3) unstable; urgency=low
+
+  [ Martin Pitt ]
+  * Add 00git_testsuite_fixes.patch: Import various test suite fixes from
+    upstream git head. This fixes the hang of the autopkgtest and makes
+    the tests work with Python 3.3.
+
+  [ Emilio Pozuelo Monfort ]
+  * debian/rules:
+    + Don't install the gphoto backend on kfreebsd as it needs hal support,
+      which we have disabled.
+
+ -- Emilio Pozuelo Monfort <pochu@debian.org>  Thu, 20 Jun 2013 23:32:21 +0200
+
+gvfs (1.16.2-2) unstable; urgency=low
+
+  * Upload to unstable.
+  * Stop building with HAL support on non-Linux. This code is no longer
+    maintained and tested and HAL is scheduled to be removed.
+
+ -- Michael Biebl <biebl@debian.org>  Fri, 24 May 2013 18:38:00 +0200
+
+gvfs (1.16.2-1) experimental; urgency=low
+
+  [ Martin Pitt ]
+  * Enable gnome-online-accounts volume monitor. Add libgoa-1.0-dev build
+    dependency for this.
+
+  [ Andreas Henriksson ]
+  * New upstream release.
+  * Refresh patches to apply cleanly:
+    - debian/patches/06_metadata_nfs.patch
+    - debian/patches/dont-crash-on-null-job.patch
+    - debian/patches/metadata-dont-flush-null-tree.patch
+    - debian/patches/metadata-nuke-junk-data.patch
+    - debian/patches/ref-jobs-in-thread.patch
+
+ -- Andreas Henriksson <andreas@fatal.se>  Fri, 24 May 2013 17:37:49 +0200
+
+
 gvfs (1.16.0-1blankon1) suroboyo; urgency=low
 
   * New upstream release

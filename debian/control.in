@@ -1,7 +1,8 @@
 Source: gvfs
 Section: gnome
 Priority: optional
-Maintainer: Debian GNOME Maintainers <pkg-gnome-maintainers@lists.alioth.debian.org>
+Maintainer: BlankOn Developers <BlankOn-dev@googlegroups.com>
+XSBC-OriginalMaintainer: Debian GNOME Maintainers <pkg-gnome-maintainers@lists.alioth.debian.org>
 Uploaders: @GNOME_TEAM@
 Build-Depends: debhelper (>= 8.1.3),
                autotools-dev,
@@ -10,7 +11,7 @@ Build-Depends: debhelper (>= 8.1.3),
                gnome-pkg-tools (>= 0.7),
                pkg-config,
                gtk-doc-tools,
-               libglib2.0-dev (>= 2.35.0),
+               libglib2.0-dev (>= 2.37.0),
                libdbus-1-dev,
                intltool (>= 0.35.0),
                openssh-client,
@@ -20,27 +21,27 @@ Build-Depends: debhelper (>= 8.1.3),
                libavahi-glib-dev (>= 0.6),
                libavahi-client-dev (>= 0.6),
                libfuse-dev,
-               libhal-dev (>= 0.5.10),
                libgudev-1.0-dev (>= 001),
                libcdio-paranoia-dev (>= 0.78.2),
                libbluetooth-dev (>= 4.0),
+               libgoa-1.0-dev (>= 3.7.1),
                libdbus-glib-1-dev,
                libexpat1-dev,
                libgphoto2-2-dev (>= 2.4.0),
                libsecret-1-dev,
                libbluray-dev,
-               libmtp-dev (>= 1.1.0),
+               libmtp-dev (>= 1.1.6),
                libsmbclient-dev (>= 3.0),
                libarchive-dev,
                libgcrypt11-dev (>= 1.2.2),
                libltdl-dev,
-               libimobiledevice-dev (>= 1.1.0),
+               libimobiledevice-dev (>= 1.1.5),
                libplist-dev,
                libudisks2-dev (>= 1.97),
                libsystemd-login-dev (>= 44),
                libgtk-3-dev
-Standards-Version: 3.9.3
-Vcs-Svn: svn://anonscm.debian.org/svn/pkg-gnome/desktop/unstable/gvfs
+Standards-Version: 3.9.4
+Vcs-Svn: svn://anonscm.debian.org/pkg-gnome/desktop/unstable/gvfs
 Vcs-Browser: http://anonscm.debian.org/viewvc/pkg-gnome/desktop/unstable/gvfs/
 XS-Testsuite: autopkgtest
 
@@ -76,13 +77,11 @@ Section: libs
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          x11-utils,
-         udisks2 [linux-any],
+         udisks2,
          gvfs-libs (= ${binary:Version}),
          gvfs-common (= ${source:Version})
 Recommends: dbus,
-            hal (>= 0.5.10) [!linux-any],
-            gnome-mount [!linux-any] | exo-utils [!linux-any],
-            policykit-1-gnome [linux-any],
+            policykit-1-gnome,
             gvfs
 Suggests: gvfs-backends
 Breaks: brasero (<< 2.28.0-2),
@@ -142,11 +141,11 @@ Description: userspace virtual filesystem - common data files
  components.
 
 Package: gvfs-fuse
-Architecture: linux-any kfreebsd-any
+Architecture: any
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          gvfs (= ${binary:Version}),
-         fuse (>= 2.8.4) [linux-any]
+         fuse (>= 2.8.4)
 Description: userspace virtual filesystem - fuse server
  gvfs is a userspace virtual filesystem where mounts run as separate
  processes which you talk to via D-Bus. It also contains a gio module

@@ -11,7 +11,6 @@ usr/share/gvfs/mounts/computer.mount
 usr/share/gvfs/mounts/localtest.mount
 usr/share/gvfs/mounts/trash.mount
 # Now installed from debian/rules
-# usr/lib/gvfs/gvfs-{hal,udisks2}-volume-monitor
-# usr/share/dbus-1/services/org.gtk.Private.{Hal,UDisks2}VolumeMonitor.service
-# usr/share/gvfs/remote-volume-monitors/{hal,udisks2}.monitor
-# debian/xdg-mount /usr/bin/
+# usr/lib/gvfs/gvfs-udisks2-volume-monitor
+# usr/share/dbus-1/services/org.gtk.Private.UDisks2.VolumeMonitor.service
+# usr/share/gvfs/remote-volume-monitors/udisks2.monitor

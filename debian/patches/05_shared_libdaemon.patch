@@ -55,10 +55,10 @@ Origin: vendor, Debian
  
 -libdaemon_la_SOURCES = \
 +libgvfsdaemon_la_SOURCES = \
+ 	gvfstypes.h \
  	gvfsdaemon.c gvfsdaemon.h \
  	gvfsbackend.c gvfsbackend.h \
- 	gvfschannel.c gvfschannel.h \
-@@ -197,6 +199,12 @@
+@@ -199,6 +201,12 @@
  	gvfskeyring.h gvfskeyring.c \
          $(NULL)
  

@@ -5,7 +5,7 @@ Description: revert upstream patch for libgphoto 2.5 support it breaks build
 
 --- a/configure.ac
 +++ b/configure.ac
-@@ -472,10 +472,6 @@
+@@ -469,10 +469,6 @@
    if test "x$msg_gphoto2" = "xyes"; then
      if test "x$use_gphoto2" = "xyes"; then
        AC_DEFINE(HAVE_GPHOTO2, 1, [Define to 1 if gphoto2 is available])
