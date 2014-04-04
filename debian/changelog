@@ -1,3 +1,51 @@
+gvfs (1.20.0-1+b1blankon1) tambora; urgency=medium
+
+  * Rebuikd for repository miss +b1 
+
+ -- Aan Yustian <aftian@di.blankon.in>  Fri, 04 Apr 2014 10:09:15 +0700
+
+gvfs (1.20.0-1) unstable; urgency=medium
+
+  [ Martin Pitt ]
+  * debian/tests/control: Add umockdev test dependencies for the GPhoto test
+    case.
+  * debian/tests/control: Add isolation-machine restriction, as we fiddle with
+    the kernel in this test.
+
+  [ Andreas Henriksson ]
+  * Drop debian/patches/06_metadata_nfs.patch, obsolete. (Closes: #741114)
+    - problem worked around is fixed upstream in commit 6b12c3d7b
+      "metadata: Force tree re-read after successful flush".
+    Thanks Kenneth johansson!
+  * New upstream release.
+  * Revert changes in 1.18.2-2 to be able to target unstable.
+    - ie. lower libgoa-1.0-dev build-dep to >= 3.7.1 again.
+
+ -- Andreas Henriksson <andreas@fatal.se>  Sun, 23 Mar 2014 18:39:58 +0100
+
+gvfs (1.19.90-1) experimental; urgency=medium
+
+  * New upstream release.
+  * Bump build-dependencies according to configure.ac changes:
+    - use libsoup 2.42.0 (instead of libsoup-gnome)
+    - libsmbclient 3.4.0
+  * Drop debian/patches/05_shared_libdaemon.patch, obsolete.
+  * Refresh patches:
+    - debian/patches/handle-inactive-vfs.patch
+    - debian/patches/ref-jobs-in-thread.patch
+  * debian/rules: disable extra LDFLAGS.
+
+ -- Andreas Henriksson <andreas@fatal.se>  Mon, 17 Feb 2014 22:49:42 +0100
+
+gvfs (1.18.2-3) experimental; urgency=medium
+
+  * debian/control.in: Build-depends against libgphoto2-dev (>= 2.5) instead
+    of libgphoto2-2-dev
+  * Drop debian/patches/build_old_libgphoto.patch: We want to build against
+    the new gphoto2 API
+
+ -- Laurent Bigonville <bigon@debian.org>  Mon, 13 Jan 2014 20:08:14 +0100
+
 gvfs (1.18.3-0blankon2) suroboyo; urgency=low
 
   * debian/control.in: Build-depends against libgphoto2-dev (>= 2.5) instead

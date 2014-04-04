@@ -2,7 +2,7 @@ Source: gvfs
 Section: gnome
 Priority: optional
 Maintainer: BlankOn Developers <blankon-dev@googlegroups.com>
-XSBC-Original-Maintainer: Debian GNOME Maintainers <pkg-gnome-maintainers@lists.alioth.debian.org>
+XSBC-original-Maintainer: Debian GNOME Maintainers <pkg-gnome-maintainers@lists.alioth.debian.org>
 Uploaders: @GNOME_TEAM@
 Build-Depends: debhelper (>= 8.1.3),
                autotools-dev,
@@ -15,7 +15,7 @@ Build-Depends: debhelper (>= 8.1.3),
                libdbus-1-dev,
                intltool (>= 0.35.0),
                openssh-client,
-               libsoup-gnome2.4-dev (>= 2.34.0),
+               libsoup2.4-dev (>= 2.42.0),
                libxml2-dev,
                libudev-dev (>= 0.138),
                libavahi-glib-dev (>= 0.6),
@@ -24,14 +24,14 @@ Build-Depends: debhelper (>= 8.1.3),
                libgudev-1.0-dev (>= 001),
                libcdio-paranoia-dev (>= 0.78.2),
                libbluetooth-dev (>= 4.0),
-               libgoa-1.0-dev (>= 3.10),
+               libgoa-1.0-dev (>= 3.7.1),
                libdbus-glib-1-dev,
                libexpat1-dev,
                libgphoto2-dev (>= 2.5.0),
                libsecret-1-dev,
                libbluray-dev,
                libmtp-dev (>= 1.1.6),
-               libsmbclient-dev (>= 3.0),
+               libsmbclient-dev (>= 3.4.0),
                libarchive-dev,
                libgcrypt11-dev (>= 1.2.2),
                libltdl-dev,
@@ -77,11 +77,11 @@ Section: libs
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          x11-utils,
-         udisks2 [linux-any],
+         udisks2,
          gvfs-libs (= ${binary:Version}),
          gvfs-common (= ${source:Version})
 Recommends: dbus,
-            policykit-1-gnome [linux-any],
+            policykit-1-gnome,
             gvfs
 Suggests: gvfs-backends
 Breaks: brasero (<< 2.28.0-2),
@@ -145,7 +145,7 @@ Architecture: any
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          gvfs (= ${binary:Version}),
-         fuse (>= 2.8.4) [linux-any]
+         fuse (>= 2.8.4)
 Description: userspace virtual filesystem - fuse server
  gvfs is a userspace virtual filesystem where mounts run as separate
  processes which you talk to via D-Bus. It also contains a gio module

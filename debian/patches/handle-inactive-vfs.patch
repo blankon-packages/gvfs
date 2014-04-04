@@ -4,7 +4,7 @@ Bug-Ubuntu: LP #832533
 
 --- a/client/gdaemonvfs.c
 +++ b/client/gdaemonvfs.c
-@@ -1483,7 +1483,7 @@
+@@ -1449,7 +1449,7 @@
  GDBusConnection *
  _g_daemon_vfs_get_async_bus (void)
  {

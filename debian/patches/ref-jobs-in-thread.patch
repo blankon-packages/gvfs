@@ -21,7 +21,7 @@ Origin: vendor, Ubuntu
      }
  }
  
-@@ -1057,7 +1059,8 @@
+@@ -1058,7 +1060,8 @@
  g_vfs_daemon_run_job_in_thread (GVfsDaemon *daemon,
  				GVfsJob    *job)
  {
