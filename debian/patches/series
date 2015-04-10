@@ -1,6 +1,6 @@
+revert-0001-Remove-obsolte-obexftp-code.patch
 01_modules_dir.patch
 04_hurd_path_max.patch
-metadata-dont-flush-null-tree.patch
 metadata-nuke-junk-data.patch
 dont-crash-on-null-job.patch
 handle-inactive-vfs.patch

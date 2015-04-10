@@ -2,9 +2,11 @@ Description: If the VFS never initialized, don't crash when creating volume moni
 Origin: vendor, Ubuntu
 Bug-Ubuntu: LP #832533
 
---- a/client/gdaemonvfs.c
-+++ b/client/gdaemonvfs.c
-@@ -1449,7 +1449,7 @@
+Index: gvfs-1.22.1/client/gdaemonvfs.c
+===================================================================
+--- gvfs-1.22.1.orig/client/gdaemonvfs.c	2014-10-13 15:47:09.482390820 +0200
++++ gvfs-1.22.1/client/gdaemonvfs.c	2014-10-13 15:47:09.478390751 +0200
+@@ -1459,7 +1459,7 @@
  GDBusConnection *
  _g_daemon_vfs_get_async_bus (void)
  {

@@ -2,9 +2,11 @@ Description: Don't try to announce the finish of a NULL job.
 Origin: vendor, Ubuntu
 Bug-Ubuntu: LP #345754, #838464
 
---- a/daemon/gvfschannel.c
-+++ b/daemon/gvfschannel.c
-@@ -608,7 +608,8 @@
+Index: gvfs-1.22.1/daemon/gvfschannel.c
+===================================================================
+--- gvfs-1.22.1.orig/daemon/gvfschannel.c	2014-10-13 15:47:06.258335776 +0200
++++ gvfs-1.22.1/daemon/gvfschannel.c	2014-10-13 15:47:06.258335776 +0200
+@@ -603,7 +603,8 @@
  
    job = channel->priv->current_job;
    channel->priv->current_job = NULL;
@@ -14,7 +16,7 @@ Bug-Ubuntu: LP #345754, #838464
  
    class = G_VFS_CHANNEL_GET_CLASS (channel);
    
-@@ -629,7 +630,7 @@
+@@ -624,7 +625,7 @@
      }
    /* Start queued request or readahead */
    else if (!start_queued_request (channel) &&

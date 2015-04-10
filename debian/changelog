@@ -1,8 +1,134 @@
-gvfs (1.20.0-1+b1blankon1) tambora; urgency=medium
+gvfs (1.24.0-1blankon1) tambora; urgency=medium
 
-  * Rebuikd for repository miss +b1 
+  * New upstream release
+  * Merge with Debian Experimental
 
- -- Aan Yustian <aftian@di.blankon.in>  Fri, 04 Apr 2014 10:09:15 +0700
+ -- Mahyuddin <yudi.al@gmail.com>  Fri, 10 Apr 2015 20:15:13 +0700
+
+gvfs (1.24.0-1) experimental; urgency=medium
+
+  * New upstream release 1.24.0
+    + Fix g-ir-compiler failures
+
+ -- Iain Lane <laney@debian.org>  Wed, 01 Apr 2015 13:06:16 +0100
+
+gvfs (1.23.92-1) experimental; urgency=medium
+
+  * New upstream release 1.23.92
+    + metadata: Reliability improvements
+    + afc, gphoto2: Fix force unmount when device is removed
+    + ftp: Prevent segfault when unmounting
+    + ftp: Bug fixes for directory parsing
+    + dav: Fix crash on mount when using dns-sd
+    + common: Increase mount timeout to 30 minutes
+    + Several smaller bugfixes
+    + Update man pages
+  * debian/patches/revert-0001-Remove-obsolte-obexftp-code.patch: Temporarily
+    restore obexftp - it's still useful to be able to use this via Bluez 4,
+    for some usecases.
+  * debian/patches/metadata-dont-flush-null-tree.patch: Drop, this bug was
+    fixed upstream.
+  * debian/control{,.in}: Bump required version of glib to ≥ 2.43.2, as per
+    upstream.
+
+ -- Iain Lane <laney@debian.org>  Wed, 18 Mar 2015 12:36:22 +0000
+
+gvfs (1.23.90-1) experimental; urgency=medium
+
+  * New upstream release 1.23.90
+    - ftp: Implement backups for replace
+    - ftp: Implement G_FILE_COPY_NOFOLLOW_SYMLINKS
+    - programs: Fix bash completion
+    - dav: Add support for server-side copying
+    - mtp: Set MTP filetype from mime type when uploading files
+    - gvfs-mount: Allow mounting as an anonymous user
+    - smb: Handle the anonymous flag
+    - gproxymount: Fix crashes if eject callback isn't specified
+    - metadata: Fix crashes if tree initilization failed
+    - Fix reported size for http and dav
+  * debian/patches/metadata-nuke-junk-data.patch: Refresh.
+
+ -- Iain Lane <laney@debian.org>  Thu, 12 Mar 2015 13:17:44 +0000
+
+gvfs (1.23.2-1) experimental; urgency=medium
+
+  * New upstream release 1.23.2
+    + Try copy and delete fallback for move if backup couldn't be created
+    + mtp: Do not crash when device is unplugged
+    + tests: Several fixes
+    + Several smaller bugfixes
+
+ -- Iain Lane <laney@debian.org>  Thu, 27 Nov 2014 13:16:32 +0000
+
+gvfs (1.23.1-1) experimental; urgency=medium
+
+  * debian/watch: Watch unstable versions too, for exp.
+  * New upstream release, changes:
+    + Several improvements to unmounting reliability
+    + fuse: Several fixes to prevent data corruption and improve stat()
+      results
+    + Improve root dir name and icon handling for gphoto2 and mtp
+    + Add bash completion support for gvfs-rename and gvfs-set-attribute
+    + client: Check for G_FILE_COPY_NO_FALLBACK_FOR_MOVE when push/pulling
+    + Add -C flag to gvfs-move
+    + sftp: Don't spin during connection
+    + sftp: Correctly retrieve the username from the secret store
+    + goa: Pass "password" as ID when fetching the password
+    + tests: Some cleanups and reliability fixes
+
+ -- Iain Lane <laney@debian.org>  Wed, 26 Nov 2014 17:36:35 +0000
+
+gvfs (1.22.1-1) unstable; urgency=medium
+
+  * New upstream release.
+  * Refresh patches:
+    - debian/patches/dont-crash-on-null-job.patch
+    - debian/patches/handle-inactive-vfs.patch
+    - debian/patches/metadata-dont-flush-null-tree.patch
+    - debian/patches/metadata-nuke-junk-data.patch
+    - debian/patches/ref-jobs-in-thread.patch
+  * Add Homepage field.
+  * Update debian/copyright.
+  * Bump Standards-Version to 3.9.6.
+
+ -- Michael Biebl <biebl@debian.org>  Mon, 13 Oct 2014 16:14:48 +0200
+
+gvfs (1.22.0-1) unstable; urgency=medium
+
+  * New upstream release. (Closes: #762414)
+  * Upload to unstable.
+
+ -- Andreas Henriksson <andreas@fatal.se>  Mon, 22 Sep 2014 19:37:14 +0200
+
+gvfs (1.21.91-1) experimental; urgency=medium
+
+  * New upstream development release.
+  * Bump libgudev-1.0-dev to (>= 147) according to configure.ac
+  * Bump Standards-Version to 3.9.5
+
+ -- Andreas Henriksson <andreas@fatal.se>  Fri, 05 Sep 2014 15:26:41 -0700
+
+gvfs (1.20.3-1) unstable; urgency=medium
+
+  [ Martin Pitt ]
+  * autopkgtest: Use "allow-stderr" instead of input redirection.
+
+  [ Andreas Henriksson ]
+  * New upstream release.
+
+ -- Andreas Henriksson <andreas@fatal.se>  Thu, 28 Aug 2014 16:52:10 -0700
+
+gvfs (1.20.2-1) unstable; urgency=medium
+
+  * New upstream release.
+
+ -- Andreas Henriksson <andreas@fatal.se>  Fri, 23 May 2014 12:05:05 +0200
+
+gvfs (1.20.1-1) unstable; urgency=medium
+
+  * New upstream release
+
+ -- Iain Lane <laney@debian.org>  Tue, 15 Apr 2014 12:37:06 +0100
 
 gvfs (1.20.0-1) unstable; urgency=medium
 
@@ -45,27 +171,6 @@ gvfs (1.18.2-3) experimental; urgency=medium
     the new gphoto2 API
 
  -- Laurent Bigonville <bigon@debian.org>  Mon, 13 Jan 2014 20:08:14 +0100
-
-gvfs (1.18.3-0blankon2) suroboyo; urgency=low
-
-  * debian/control.in: Build-depends against libgphoto2-dev (>= 2.5) instead
-    of libgphoto2-2-dev
-  * Drop debian/patches/build_old_libgphoto.patch: We want to build
-    against the new gphoto2 API
-
- -- Mahyuddin Ramli <yudi.al@gmail.com>  Wed, 15 Jan 2014 22:15:46 +0700
-
-gvfs (1.18.3-0blankon1) suroboyo; urgency=medium
-
-  * New upstream release
-
- -- Mahyuddin Ramli <yudi.al@gmail.com>  Mon, 13 Jan 2014 19:47:03 +0700
-
-gvfs (1.18.2-2blankon1) suroboyo; urgency=low
-
-  * Rebuild against
-
- -- Mahyuddin Idram Ahmad <dotovr@di.blankon.in>  Sun, 17 Nov 2013 13:41:16 +0700
 
 gvfs (1.18.2-2) experimental; urgency=low
 

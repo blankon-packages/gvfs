@@ -1,0 +1,3580 @@
+reverted:
+Index: b/INSTALL
+===================================================================
+--- /dev/null
++++ b/INSTALL
+@@ -0,0 +1,3 @@
++The ObexFTP backend requires the obex-data-server D-Bus service in
++addition to the dependencies listed in the configure. See:
++http://wiki.muiline.com/obex-data-server
+Index: b/client/test-uri-utils.c
+===================================================================
+--- a/client/test-uri-utils.c
++++ b/client/test-uri-utils.c
+@@ -14,6 +14,8 @@
+ 	{ "https://[2001:0db8:85a3:08d3:1319:8a2e:0370:7344]:443/", "[2001:0db8:85a3:08d3:1319:8a2e:0370:7344]", 443 },
+ 	{ "http://test:443/", "test", 443 },
+ 	{ "http://test/", "test", -1 },
++	{ "obex://[00:FF:FF:FF:FF:FF]/MMC/foo.jpg", "[00:FF:FF:FF:FF:FF]", -1 },
++	{ "obex://[00:FF:FF:FF:FF:FF]/C:", "[00:FF:FF:FF:FF:FF]", -1 },
+ 	{ "http://windows-host:8080/C:/", "windows-host", 8080 },
+ 	{ "smb://user:password@192.192.192.192/foobar", "192.192.192.192", -1 },
+ 	{ "https://d134w4tst3t.s3.amazonaws.com/a?Signature=6VJ9%2BAdPVZ4Z7NnPShRvtDsLofc%3D&Expires=1249330377&AWSAccessKeyId=0EYZF4DV8A7WM0H73602", "d134w4tst3t.s3.amazonaws.com", -1 },
+Index: b/configure.ac
+===================================================================
+--- a/configure.ac
++++ b/configure.ac
+@@ -407,6 +407,40 @@
+ 
+ AM_CONDITIONAL(USE_GOA, [test "$msg_goa" = "yes"])
+ 
++dnl *****************************************************
++dnl *** Check if we should build with obexftp backend ***
++dnl *****************************************************
++AC_ARG_ENABLE(obexftp, AS_HELP_STRING([--disable-obexftp],[build without ObexFTP backend]))
++msg_obexftp=no
++OBEXFTP_LIBS=
++OBEXFTP_CFLAGS=
++
++if test "x$enable_obexftp" != "xno";  then
++  PKG_CHECK_EXISTS(dbus-glib-1 bluez >= 4.0, msg_obexftp=yes)
++
++  dnl Make sure we have expat
++  AC_CHECK_LIB(expat, XML_ParserCreate_MM,
++               [ AC_CHECK_HEADERS(expat.h, have_expat=true, have_expat=false) ],
++               have_expat=false)
++
++  if test "x$msg_obexftp" = "xyes" -a "x$have_expat" = "xtrue"; then
++    PKG_CHECK_MODULES(OBEXFTP, dbus-glib-1 bluez >= 4.0)
++    AC_SUBST(OBEXFTP_LIBS)
++    AC_SUBST(OBEXFTP_CFLAGS)
++
++    msg_obexftp=yes
++    AC_DEFINE(HAVE_OBEXFTP, 1, [Define to 1 if ObexFTP is going to be built])
++    EXPAT_CFLAGS=""
++    EXPAT_LIBS="-lexpat"
++  else
++    msg_obexftp=no
++  fi
++fi
++
++AC_SUBST(EXPAT_CFLAGS)
++AC_SUBST(EXPAT_LIBS)
++AM_CONDITIONAL(USE_OBEXFTP, [test "$msg_obexftp" = "yes"])
++
+ dnl *************************
+ dnl *** Check for gphoto2 ***
+ dnl *************************
+@@ -927,6 +961,7 @@
+ 
+ 	Blu-ray metadata support:     $msg_bluray
+         HTTP/WebDAV support:          $msg_http
++        ObexFTP support               $msg_obexftp
+ 	Samba support:	              $msg_samba
+ 	FUSE support:                 $msg_fuse
+         CDDA support:                 $msg_cdda
+Index: b/daemon/Makefile.am
+===================================================================
+--- a/daemon/Makefile.am
++++ b/daemon/Makefile.am
+@@ -11,6 +11,7 @@
+ 	-I$(top_builddir)			\
+ 	-I$(top_builddir)/common		\
+ 	$(GLIB_CFLAGS) 				\
++	$(OBEXFTP_CFLAGS) $(EXPAT_CFLAGS)	\
+ 	$(KEYRING_CFLAGS)			\
+ 	-DLIBEXEC_DIR=\"$(libexecdir)\" 	\
+ 	-DMOUNTABLE_DIR=\"$(mountdir)\" 	\
+@@ -88,6 +89,20 @@
+ libexec_PROGRAMS += gvfsd-mtp
+ endif
+ 
++mount_in_files += obexftp.mount.in
++if USE_OBEXFTP
++mount_DATA += obexftp.mount
++libexec_PROGRAMS += gvfsd-obexftp
++BUILT_SOURCES = obexftp-marshal.c obexftp-marshal.h
++
++obexftp-marshal.h: obexftp-marshal.list
++	$(AM_V_GEN) glib-genmarshal $< --prefix=obexftp_marshal --header > $@
++
++obexftp-marshal.c: obexftp-marshal.list
++	$(AM_V_GEN) echo "#include \"obexftp-marshal.h\"" > $@ && glib-genmarshal $< --prefix=obexftp_marshal --body >> $@
++
++endif
++
+ mount_in_files += dns-sd.mount.in
+ if HAVE_AVAHI
+ mount_DATA += dns-sd.mount
+@@ -125,6 +140,7 @@
+ EXTRA_DIST = 				\
+ 	gvfs-daemon.service.in		\
+ 	$(mount_in_files)		\
++	obexftp-marshal.list		\
+ 	$(gvfs_gschemas)		\
+ 	$(gvfs_gschemas_convert_DATA)	\
+ 	$(gsettings_ENUM_FILES)		\
+@@ -259,6 +275,29 @@
+ 
+ gvfsd_smb_browse_LDADD = $(SAMBA_LIBS) $(libraries)
+ 
++gvfsd_obexftp_SOURCES = \
++	gvfsbackendobexftp.c gvfsbackendobexftp.h \
++	obexftp-marshal.c obexftp-marshal.h \
++	gvfsbackendobexftp-fl-parser.c gvfsbackendobexftp-fl-parser.h \
++	gvfsbackendobexftp-cap-parser.c gvfsbackendobexftp-cap-parser.h \
++	daemon-main.c daemon-main.h \
++	daemon-main-generic.c
++
++gvfsd_obexftp_CPPFLAGS = \
++	$(flags) \
++	-DBACKEND_HEADER=gvfsbackendobexftp.h \
++	-DDEFAULT_BACKEND_TYPE=obex \
++	-DMAX_JOB_THREADS=1 \
++	-DBACKEND_TYPES='"obex", G_VFS_TYPE_BACKEND_OBEXFTP,'
++if USE_HAL
++gvfsd_obexftp_CPPFLAGS += $(HAL_CFLAGS)
++endif
++
++gvfsd_obexftp_LDADD = $(OBEXFTP_LIBS) $(EXPAT_LIBS) $(libraries)
++if USE_HAL
++gvfsd_obexftp_LDADD += $(HAL_LIBS)
++endif
++
+ gvfsd_ftp_SOURCES = \
+ 	gvfsftpconnection.c gvfsftpconnection.h \
+ 	gvfsftpdircache.c gvfsftpdircache.h \
+Index: b/daemon/gvfsbackendobexftp-cap-parser.c
+===================================================================
+--- /dev/null
++++ b/daemon/gvfsbackendobexftp-cap-parser.c
+@@ -0,0 +1,592 @@
++/*
++ * Copyright (C) 2004-2005 Nokia Corporation.
++ * Copyright (C) 2008 Bastien Nocera <hadess@hadess.net>
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public License as
++ * published by the Free Software Foundation; version 2 of the
++ * License.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this program; if not, write to the
++ * Free Software Foundation, Inc., 51 Franklin Street - Fifth Floor,
++ * Boston, MA 02110-1301, USA.
++ */
++
++#include <config.h>
++#include <stdlib.h>
++#include <string.h>
++#include <glib.h>
++#include <expat.h>
++
++#include "gvfsbackendobexftp-cap-parser.h"
++
++#define d(x)
++
++struct _OvuCaps {
++	GList *memory_entries;
++
++	/* FIXME: Add "Services" and "Inbox" data here later. */
++};
++
++struct _OvuCapsMemory {
++        gchar   *type;
++        goffset  free;
++        goffset  used;
++        guint    has_free : 1;
++	guint    has_used : 1;
++        guint    case_sensitive : 1;
++};
++
++typedef enum {
++	PARSER_STATE_INVALID,
++
++	PARSER_STATE_START,
++	PARSER_STATE_CAPABILITY,
++
++	PARSER_STATE_GENERAL,
++
++	PARSER_STATE_MEMORY,
++	PARSER_STATE_MEMORY_TYPE,
++	PARSER_STATE_MEMORY_LOCATION,
++	PARSER_STATE_MEMORY_FREE,
++	PARSER_STATE_MEMORY_USED,
++	PARSER_STATE_MEMORY_SHARED,
++	PARSER_STATE_MEMORY_FILESIZE,
++	PARSER_STATE_MEMORY_FOLDERSIZE,
++	PARSER_STATE_MEMORY_FILELEN,
++	PARSER_STATE_MEMORY_FOLDERLEN,
++	PARSER_STATE_MEMORY_CASE,
++	PARSER_STATE_MEMORY_EXT,
++
++	PARSER_STATE_INBOX,
++	PARSER_STATE_SERVICE,
++
++	PARSER_STATE_SKIP
++} ParserState;
++
++
++typedef struct {
++	GList             *state;
++
++	GList             *memory_entries;
++
++	gchar             *memory_type;
++	goffset   memory_free;
++	goffset   memory_used;
++	gboolean           memory_has_free;
++	gboolean           memory_has_used;
++	gboolean           memory_case_sensitive;
++
++	GError           **error;
++} ParserData;
++
++static void    cap_parser_start_node_cb   (void                 *user_data,
++					   const char           *node_name,
++					   const char          **attr);
++
++static void    cap_parser_end_node_cb     (void                 *user_data,
++					   const char           *node_name);
++static void    cap_parser_text_cb         (void                 *user_data,
++					   const XML_Char       *s,
++                                           int                   len);
++static XML_Parser
++cap_parser_create_parser                  (ParserData           *data);
++
++
++static void
++cap_parser_push_state (ParserData *data, ParserState state)
++{
++	data->state = g_list_prepend (data->state,
++				      GINT_TO_POINTER (state));
++}
++
++static ParserState
++cap_parser_pop_state (ParserData *data)
++{
++	ParserState state;
++
++	if (!data->state) {
++		return PARSER_STATE_INVALID;
++	}
++
++	state = GPOINTER_TO_INT (data->state->data);
++	data->state = g_list_delete_link (data->state, data->state);
++
++	return state;
++}
++
++static ParserState
++cap_parser_peek_state (ParserData *data)
++{
++	if (!data->state) {
++		return PARSER_STATE_START;
++	}
++
++	return GPOINTER_TO_INT (data->state->data);
++}
++
++static const char *
++cap_parser_get_attribute_value (const char  *name, const char **attr)
++{
++	gint i = 0;
++
++	while (attr[i]) {
++		if (strcmp (name, attr[i]) == 0) {
++			return attr[i + 1];
++		}
++		i += 2;
++	}
++
++	return "";
++}
++
++static void
++cap_parser_start_node_cb (void        *user_data,
++			  const char  *node_name,
++			  const char **attr)
++{
++	ParserData  *data;
++	ParserState  state;
++	const gchar *version;
++
++	data = (ParserData *) user_data;
++
++	state = cap_parser_peek_state (data);
++
++	switch (state) {
++	case PARSER_STATE_START:
++		if (strcmp (node_name, "Capability") != 0) {
++			g_set_error (data->error,
++				     G_MARKUP_ERROR,
++				     G_MARKUP_ERROR_INVALID_CONTENT,
++				     "Outermost element must be a <Capability>, not <%s>",
++				     node_name);
++			return;
++		}
++
++		version = cap_parser_get_attribute_value ("version", attr);
++		/* Assume an empty version is fine */
++		if (strcmp (version, "1.0") != 0 && version[0] != '\0') {
++			g_warning ("Version expected is '1.0', not '%s'\n", version);
++		}
++
++		cap_parser_push_state (data, PARSER_STATE_CAPABILITY);
++		break;
++
++	case PARSER_STATE_CAPABILITY:
++		if (strcmp (node_name, "General") == 0) {
++			cap_parser_push_state (data, PARSER_STATE_GENERAL);
++		}
++		else if (strcmp (node_name, "Inbox") == 0) {
++			cap_parser_push_state (data, PARSER_STATE_INBOX);
++		}
++		else if (strcmp (node_name, "Service") == 0) {
++			cap_parser_push_state (data, PARSER_STATE_SERVICE);
++		} else {
++			g_set_error (data->error,
++				     G_MARKUP_ERROR,
++				     G_MARKUP_ERROR_INVALID_CONTENT,
++				     "Don't expect node '%s' as child of 'Cap'",
++				     node_name);
++			return;
++		}
++		break;
++
++	case PARSER_STATE_GENERAL:
++		if (strcmp (node_name, "Memory") == 0) {
++			cap_parser_push_state (data, PARSER_STATE_MEMORY);
++		}
++		else if (strcmp (node_name, "Manufacturer") == 0 ||
++			 strcmp (node_name, "Model") == 0 ||
++			 strcmp (node_name, "SN") == 0 ||
++			 strcmp (node_name, "OEM") == 0 ||
++			 strcmp (node_name, "SW") == 0 ||
++			 strcmp (node_name, "FW") == 0 ||
++			 strcmp (node_name, "HW") == 0 ||
++			 strcmp (node_name, "Language") == 0 ||
++			 strcmp (node_name, "Ext") == 0) {
++
++			/* Skip these for now. */
++			cap_parser_push_state (data, PARSER_STATE_SKIP);
++		} else {
++			g_set_error (data->error,
++				     G_MARKUP_ERROR,
++				     G_MARKUP_ERROR_INVALID_CONTENT,
++				     "Don't expect node '%s' as child of 'General'",
++				     node_name);
++			return;
++		}
++
++		break;
++
++	case PARSER_STATE_MEMORY:
++		if (strcmp (node_name, "MemType") == 0) {
++			cap_parser_push_state (data, PARSER_STATE_MEMORY_TYPE);
++		}
++		else if (strcmp (node_name, "Location") == 0) {
++			cap_parser_push_state (data, PARSER_STATE_MEMORY_LOCATION);
++		}
++		else if (strcmp (node_name, "Free") == 0) {
++			cap_parser_push_state (data, PARSER_STATE_MEMORY_FREE);
++		}
++		else if (strcmp (node_name, "Used") == 0) {
++			cap_parser_push_state (data, PARSER_STATE_MEMORY_USED);
++		}
++		else if (strcmp (node_name, "Shared") == 0) {
++			cap_parser_push_state (data, PARSER_STATE_MEMORY_SHARED);
++		}
++		else if (strcmp (node_name, "FileSize") == 0) {
++			cap_parser_push_state (data, PARSER_STATE_MEMORY_FILESIZE);
++		}
++		else if (strcmp (node_name, "FolderSize") == 0) {
++			cap_parser_push_state (data, PARSER_STATE_MEMORY_FOLDERSIZE);
++		}
++		else if (strcmp (node_name, "FileNLen") == 0) {
++			cap_parser_push_state (data, PARSER_STATE_MEMORY_FILELEN);
++		}
++		else if (strcmp (node_name, "FolderNLen") == 0) {
++			cap_parser_push_state (data, PARSER_STATE_MEMORY_FOLDERLEN);
++		}
++		else if (strcmp (node_name, "CaseSenN") == 0) {
++			cap_parser_push_state (data, PARSER_STATE_MEMORY_CASE);
++			data->memory_case_sensitive = TRUE;
++		}
++		else if (strcmp (node_name, "Ext") == 0) {
++			cap_parser_push_state (data, PARSER_STATE_MEMORY_EXT);
++		} else {
++			g_set_error (data->error,
++				     G_MARKUP_ERROR,
++				     G_MARKUP_ERROR_INVALID_CONTENT,
++				     "Don't expect node '%s' as child of 'Memory'",
++				     node_name);
++			return;
++		}
++		break;
++
++	case PARSER_STATE_INBOX:
++	case PARSER_STATE_SERVICE:
++		/* Skip these for now. */
++		cap_parser_push_state (data, PARSER_STATE_SKIP);
++		break;
++
++	case PARSER_STATE_SKIP:
++		cap_parser_push_state (data, PARSER_STATE_SKIP);
++		break;
++
++	default:
++		g_warning ("Node not handled: '%s'\n", node_name);
++		cap_parser_push_state (data, PARSER_STATE_SKIP);
++		break;
++	}
++}
++
++static void
++cap_parser_reset_memory (ParserData *data)
++{
++	g_free (data->memory_type);
++	data->memory_type = NULL;
++	data->memory_free = 0;
++	data->memory_used = 0;
++	data->memory_has_free = FALSE;
++	data->memory_has_used = FALSE;
++	data->memory_case_sensitive = FALSE;
++}
++
++static void
++cap_parser_end_node_cb (void *user_data, const char *node_name)
++{
++	ParserData    *data;
++	ParserState    state;
++	OvuCapsMemory *memory;
++
++	data = (ParserData *) user_data;
++
++	state = cap_parser_pop_state (data);
++
++	switch (state) {
++	case PARSER_STATE_INVALID:
++		return;
++
++	case PARSER_STATE_MEMORY:
++		memory = ovu_caps_memory_new (data->memory_type,
++					      data->memory_free,
++					      data->memory_used,
++					      data->memory_has_free,
++					      data->memory_has_used,
++					      data->memory_case_sensitive);
++
++		data->memory_entries = g_list_prepend (data->memory_entries,
++						       memory);
++		cap_parser_reset_memory (data);
++		break;
++
++	case PARSER_STATE_CAPABILITY:
++		data->memory_entries = g_list_reverse (data->memory_entries);
++		break;
++
++	default:
++		break;
++	}
++}
++
++/* Parse a long, return -1 if input is not strictly valid or null. */
++static goffset
++parse_long (const gchar *str, gboolean *success)
++{
++	gchar *endptr;
++	glong  l;
++
++	*success = TRUE;
++
++	if (!str) {
++		*success = FALSE;
++		return 0;
++	}
++
++	l = strtol (str, &endptr, 10);
++	if (endptr[0] != '\0' || l < 0) {
++		*success = FALSE;
++		l = 0;
++	}
++
++	return l;
++}
++
++static void
++cap_parser_text_cb (void           *user_data,
++		    const XML_Char *s,
++		    int             len)
++{
++	ParserData  *data;
++	ParserState  state;
++	gchar       *tmp;
++
++	data = (ParserData *) user_data;
++
++	/* text is not null terminated. */
++	tmp = g_strndup (s, len);
++
++	state = cap_parser_peek_state (data);
++
++	switch (state) {
++	case PARSER_STATE_MEMORY_TYPE:
++		data->memory_type = g_strdup (tmp);
++		break;
++	case PARSER_STATE_MEMORY_FREE:
++		data->memory_free = parse_long (tmp, &data->memory_has_free);
++		break;
++	case PARSER_STATE_MEMORY_USED:
++		data->memory_used = parse_long (tmp, &data->memory_has_used);
++		break;
++
++	default:
++		break;
++	}
++
++	g_free (tmp);
++}
++
++static XML_Parser
++cap_parser_create_parser (ParserData *data)
++{
++	XML_Parser parser;
++
++	parser = XML_ParserCreate (NULL);
++
++	XML_SetElementHandler (parser,
++			       cap_parser_start_node_cb,
++			       cap_parser_end_node_cb);
++
++	XML_SetCharacterDataHandler (parser, cap_parser_text_cb);
++
++	XML_SetUserData (parser, data);
++
++	return parser;
++}
++
++static void
++cap_parser_free (ParserData *data, gboolean free_data)
++{
++	cap_parser_reset_memory (data);
++
++	if (free_data) {
++		g_list_foreach (data->memory_entries,
++				(GFunc) ovu_caps_memory_free, NULL);
++	}
++
++	g_free (data);
++}
++
++OvuCaps *
++ovu_caps_parser_parse (const gchar  *buf,
++		       gint          len,
++		       GError      **error)
++{
++	ParserData *data;
++	XML_Parser  parser;
++	OvuCaps    *caps;
++
++	data = g_new0 (ParserData, 1);
++
++	data->error = error;
++	parser = cap_parser_create_parser (data);
++
++	if (XML_Parse (parser, buf, len, TRUE) == 0) {
++		caps = NULL;
++
++		if (*error == NULL) {
++			g_set_error_literal (error,
++					     G_MARKUP_ERROR,
++					     G_MARKUP_ERROR_INVALID_CONTENT,
++					     "Couldn't parse the incoming data");
++		}
++
++		cap_parser_free (data, TRUE);
++	} else {
++		caps = g_new0 (OvuCaps, 1);
++		caps->memory_entries = data->memory_entries;
++		
++		cap_parser_free (data, FALSE);
++	}
++
++	XML_ParserFree (parser);
++
++	return caps;
++}
++
++OvuCapsMemory *
++ovu_caps_memory_new (const gchar      *type,
++		     goffset  free,
++		     goffset  used,
++		     gboolean          has_free,
++		     gboolean          has_used,
++		     gboolean          case_sensitive)
++{
++	OvuCapsMemory *memory;
++
++	memory = g_new0 (OvuCapsMemory, 1);
++
++	memory->type = g_strdup (type);
++	memory->free = free;
++	memory->used = used;
++	memory->has_free = has_free;
++	memory->has_used = has_used;
++	memory->case_sensitive = case_sensitive;
++
++	return memory;
++}
++
++void
++ovu_caps_memory_free (OvuCapsMemory *memory)
++{
++	g_free (memory->type);
++	g_free (memory);
++}
++
++gboolean
++ovu_caps_memory_equal (OvuCapsMemory *m1, OvuCapsMemory *m2)
++{
++	if (strcmp (m1->type, m2->type) != 0) {
++		d(g_print ("type mismatch: %s %s\n",
++			   m1->type, m2->type));
++		return FALSE;
++	}
++
++	if (m1->free != m2->free) {
++		d(g_print ("free mismatch: %d %d\n",
++			   (int) m1->free, (int) m2->free));
++		return FALSE;
++	}
++
++	if (m1->used != m2->used) {
++		d(g_print ("used mismatch: %d %d\n",
++			   (int) m1->used, (int) m2->used));
++		return FALSE;
++	}
++
++	if (m1->case_sensitive != m2->case_sensitive) {
++		d(g_print ("case mismatch: %d %d\n",
++			   m1->case_sensitive,
++			   m2->case_sensitive));
++		return FALSE;
++	}
++
++	return TRUE;
++}
++
++void
++ovu_caps_free (OvuCaps *caps)
++{
++	g_list_free_full (caps->memory_entries, (GDestroyNotify) ovu_caps_memory_free);
++
++	g_free (caps);
++}
++
++GList *
++ovu_caps_get_memory_entries (OvuCaps *caps)
++{
++	g_return_val_if_fail (caps != NULL, NULL);
++
++	return caps->memory_entries;
++}
++
++OvuCapsMemory *
++ovu_caps_get_memory_type (OvuCaps     *caps,
++			  const gchar *mem_type)
++{
++	GList *tmp;
++
++	g_return_val_if_fail (caps != NULL, NULL);
++
++	for (tmp = caps->memory_entries; tmp != NULL; tmp = tmp->next) {
++		OvuCapsMemory *memory = tmp->data;
++
++		/* treat a NULL memory type as matching anything */
++		if (mem_type == NULL || (memory->type != NULL &&
++					 !strcmp(mem_type, memory->type)))
++			return memory;
++	}
++	return NULL;
++}
++
++const gchar *
++ovu_caps_memory_get_type (OvuCapsMemory *memory)
++{
++	return memory->type;
++}
++
++goffset
++ovu_caps_memory_get_used (OvuCapsMemory *memory)
++{
++	return memory->used;
++}
++
++goffset
++ovu_caps_memory_get_free (OvuCapsMemory *memory)
++{
++	return memory->free;
++}
++
++gboolean
++ovu_caps_memory_has_used (OvuCapsMemory *memory)
++{
++	return memory->has_used;
++}
++
++gboolean
++ovu_caps_memory_has_free (OvuCapsMemory *memory)
++{
++	return memory->has_free;
++}
++
++gboolean
++ovu_caps_memory_get_case_sensitive (OvuCapsMemory *memory)
++{
++	return memory->case_sensitive;
++}
+Index: b/daemon/gvfsbackendobexftp-cap-parser.h
+===================================================================
+--- /dev/null
++++ b/daemon/gvfsbackendobexftp-cap-parser.h
+@@ -0,0 +1,53 @@
++/*
++ * Copyright (C) 2004 Nokia Corporation.
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public License as
++ * published by the Free Software Foundation; version 2 of the
++ * License.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this program; if not, write to the
++ * Free Software Foundation, Inc., 51 Franklin Street - Fifth Floor,
++ * Boston, MA 02110-1301, USA.
++ */
++
++#ifndef __OVU_CAP_PARSER_H__
++#define __OVU_CAP_PARSER_H__
++
++#include <glib.h>
++
++typedef struct _OvuCaps       OvuCaps;
++typedef struct _OvuCapsMemory OvuCapsMemory;
++
++OvuCaps *     ovu_caps_parser_parse       (const gchar       *buf,
++					   gint               len,
++					   GError           **error);
++
++GList *          ovu_caps_get_memory_entries        (OvuCaps         *caps);
++OvuCapsMemory   *ovu_caps_get_memory_type           (OvuCaps         *caps,
++						     const gchar     *mem_type);
++void             ovu_caps_free                      (OvuCaps         *caps);
++OvuCapsMemory *  ovu_caps_memory_new                (const gchar     *type,
++						     goffset          free,
++						     goffset          used,
++						     gboolean         has_free,
++						     gboolean         has_used,
++						     gboolean         case_sensitive);
++void             ovu_caps_memory_free               (OvuCapsMemory   *memory);
++gboolean         ovu_caps_memory_equal              (OvuCapsMemory   *m1,
++						     OvuCapsMemory   *m2);
++const gchar *    ovu_caps_memory_get_type           (OvuCapsMemory   *memory);
++goffset          ovu_caps_memory_get_used           (OvuCapsMemory   *memory);
++goffset          ovu_caps_memory_get_free           (OvuCapsMemory   *memory);
++gboolean         ovu_caps_memory_has_used           (OvuCapsMemory   *memory);
++gboolean         ovu_caps_memory_has_free           (OvuCapsMemory   *memory);
++gboolean         ovu_caps_memory_get_case_sensitive (OvuCapsMemory   *memory);
++
++#endif /* __OVU_CAP_PARSER_H__ */
++
+Index: b/daemon/gvfsbackendobexftp-fl-parser.c
+===================================================================
+--- /dev/null
++++ b/daemon/gvfsbackendobexftp-fl-parser.c
+@@ -0,0 +1,437 @@
++/*
++ * Copyright (C) 2004-2005 Nokia Corporation.
++ * Copyright (C) 2008 Bastien Nocera <hadess@hadess.net> (gio port)
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public License as
++ * published by the Free Software Foundation; version 2 of the
++ * License.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this program; if not, write to the
++ * Free Software Foundation, Inc., 51 Franklin Street - Fifth Floor,
++ * Boston, MA 02110-1301, USA.
++ */
++
++#include <config.h>
++
++#include <stdlib.h>
++#include <string.h>
++#include <gio/gio.h>
++#include <expat.h>
++
++#include "gvfsbackendobexftp-fl-parser.h"
++
++#define d(x)
++
++typedef struct {
++	GError **error;
++	GList   *elements;
++
++	gint     depth;
++} ParserData;
++
++/* Static functions declaration */
++static void       fl_parser_start_node_cb     (void                *data,
++					       const char          *el,
++					       const char         **attr);
++static void       fl_parser_end_node_cb       (void                *data,
++					       const char          *el);
++static XML_Parser fl_parser_create_context    (ParserData          *data);
++static gboolean   fl_parser_fill_file_info    (GFileInfo           *file_info,
++					       const char         **attr);
++static void       fl_parser_free_parser_data  (ParserData          *data,
++					       gboolean             free_list);
++
++
++/* Function implementations */
++static void 
++fl_parser_start_node_cb (void        *user_data,
++			 const char  *node_name,
++			 const char **attr)
++{
++	ParserData *data;
++	GFileInfo  *info;
++	
++	data = (ParserData *) user_data;
++	
++	data->depth++;
++	
++	d(g_print ("%d: %s\n", data->depth, node_name));
++
++	if (data->depth > 2) {
++		g_set_error (data->error,  
++			     G_MARKUP_ERROR,  
++			     G_MARKUP_ERROR_INVALID_CONTENT,  
++			     "Don't expect node '%s' as child of 'file', 'folder' or 'parent-folder'",  
++			     node_name); 
++		return;
++	}
++	else if (data->depth == 1) {
++		if (strcmp (node_name, "folder-listing") != 0) {
++			g_set_error (data->error,  
++				     G_MARKUP_ERROR,  
++				     G_MARKUP_ERROR_INVALID_CONTENT,  
++				     "Expected 'folder-listing', got '%s'",  
++				     node_name);  
++			return;
++		}
++
++		return;
++	}
++
++	if (strcmp (node_name, "parent-folder") == 0) {
++		/* Just ignore parent-folder items */
++		return;
++	}
++	
++	info = g_file_info_new ();
++
++	if (strcmp (node_name, "file") == 0) {
++		g_file_info_set_file_type (info, G_FILE_TYPE_REGULAR);
++	}
++	else if (strcmp (node_name, "folder") == 0) {
++		GIcon *icon;
++		g_file_info_set_file_type (info, G_FILE_TYPE_DIRECTORY);
++		g_file_info_set_content_type (info, "inode/directory");
++
++		icon = g_themed_icon_new ("folder");
++		g_file_info_set_icon (info, icon);
++		g_object_unref (icon);
++		icon = g_themed_icon_new ("folder-symbolic");
++		g_file_info_set_symbolic_icon (info, icon);
++		g_object_unref (icon);
++	} else {
++		g_set_error (data->error,
++			     G_MARKUP_ERROR,
++			     G_MARKUP_ERROR_UNKNOWN_ELEMENT,
++			     "Unknown element '%s'",
++			     node_name);
++		return;
++	}
++
++	if (!fl_parser_fill_file_info (info, attr)) {
++		d(g_print ("Failed to fill GnomeVFSFileInfo from node '%s'\n",
++			   node_name));
++		g_object_unref (info);
++		return;
++	}
++
++	if (g_file_info_get_content_type (info) == NULL) {
++		char *mime_type;
++		mime_type = g_content_type_guess (g_file_info_get_name (info), NULL, 0, NULL);
++		g_file_info_set_content_type (info, mime_type);
++		g_free (mime_type);
++	}
++
++	if (g_file_info_get_content_type (info) == NULL) {
++		g_file_info_set_content_type (info, "application/octet-stream");
++	}
++
++	if (g_file_info_get_file_type (info) ==  G_FILE_TYPE_REGULAR) {
++		GIcon *icon;
++                const char *content_type;
++
++                content_type = g_file_info_get_content_type (info);
++
++		icon = g_content_type_get_icon (content_type);
++		if (icon != NULL) {
++			if (G_IS_THEMED_ICON (icon))
++				g_themed_icon_append_name (G_THEMED_ICON (icon), "text-x-generic");
++			g_file_info_set_icon (info, icon);
++			g_object_unref (icon);
++		}
++
++		icon = g_content_type_get_symbolic_icon (content_type);
++		if (icon != NULL) {
++			if (G_IS_THEMED_ICON (icon))
++				g_themed_icon_append_name (G_THEMED_ICON (icon), "text-x-generic-symbolic");
++			g_file_info_set_symbolic_icon (info, icon);
++			g_object_unref (icon);
++		}
++	}
++
++	/* Permissions on folders in OBEX has different semantics than POSIX.
++	 * In POSIX, if a folder is not writable, it means that it's content
++	 * can't be removed, whereas in OBEX, it just means that the folder
++	 * itself can't be removed. Therefore we must set all folders to RWD and
++	 * handle the error when it happens. */
++	if (g_file_info_get_file_type (info) == G_FILE_TYPE_DIRECTORY) {
++		g_file_info_set_attribute_boolean (info,
++						   G_FILE_ATTRIBUTE_ACCESS_CAN_READ,
++						   TRUE);
++		g_file_info_set_attribute_boolean (info,
++						   G_FILE_ATTRIBUTE_ACCESS_CAN_WRITE,
++						   TRUE);
++	}
++	
++	data->elements = g_list_prepend (data->elements, info);
++}
++
++static void
++fl_parser_end_node_cb (void *user_data, const char *node_name)
++{
++	ParserData *data;
++
++	data = (ParserData *) user_data;
++
++	data->depth--;
++	
++	if (data->depth < 0) {  
++		g_set_error (data->error,  
++			     G_MARKUP_ERROR,  
++			     G_MARKUP_ERROR_INVALID_CONTENT,  
++			     "Closing non-open node '%s'",  
++			     node_name);  
++		return;  
++	} 
++
++	d(g_print ("%d: /%s\n", data->depth, node_name));
++}
++
++static XML_Parser
++fl_parser_create_context (ParserData *data)
++{
++	XML_Parser parser;
++	
++	parser = XML_ParserCreate (NULL);
++	
++	XML_SetElementHandler(parser, 
++			      (XML_StartElementHandler) fl_parser_start_node_cb,
++			      (XML_EndElementHandler) fl_parser_end_node_cb);
++	XML_SetUserData (parser, data);
++
++	return parser;
++}
++
++static gboolean
++fl_parser_fill_file_info (GFileInfo *info, const char **attr)
++{
++	gint i;
++	
++	for (i = 0; attr[i]; ++i) {
++		const gchar *name;
++		const gchar *value;
++
++		name  = attr[i];
++		value = attr[++i];
++		
++		if (strcmp (name, "name") == 0) {
++			char *display_name;
++			/* Apparently someone decided it was a good idea
++			 * to send name="" mem-type="MMC" 
++			 */
++			if (!value || strcmp (value, "") == 0) {
++				return FALSE;
++			}
++
++			g_file_info_set_name (info, value);
++			display_name = g_filename_display_name (value);
++			g_file_info_set_display_name (info, display_name);
++			d(g_print ("Name: '%s'\n", display_name));
++			g_free (display_name);
++		}
++		else if (strcmp (name, "size") == 0) {
++			g_file_info_set_size (info, strtoll (value, NULL, 10));
++			d(g_print ("Size: '%"G_GINT64_FORMAT"'\n", g_file_info_get_size (info)));
++		}
++		else if (strcmp (name, "modified") == 0) {
++			GTimeVal time;
++
++			if (g_time_val_from_iso8601 (value, &time) == FALSE)
++				continue;
++			g_file_info_set_modification_time (info, &time);
++			d(g_print ("Modified: '%s' = '%d'\n", 
++				   value, (int)time.tv_sec));
++		}
++		else if (strcmp (name, "created") == 0) {
++			GTimeVal time;
++
++			if (g_time_val_from_iso8601 (value, &time) == FALSE)
++				continue;
++			g_file_info_set_attribute_uint64 (info,
++							  G_FILE_ATTRIBUTE_TIME_CREATED,
++							  time.tv_sec);
++			g_file_info_set_attribute_uint32 (info,
++							  G_FILE_ATTRIBUTE_TIME_CREATED_USEC,
++							  time.tv_usec);
++			d(g_print ("Created: '%s' = '%d'\n", 
++				   value, (int)time.tv_sec));
++		}
++		else if (strcmp (name, "accessed") == 0) {
++			GTimeVal time;
++
++			if (g_time_val_from_iso8601 (value, &time) == FALSE)
++				continue;
++			g_file_info_set_attribute_uint64 (info,
++							  G_FILE_ATTRIBUTE_TIME_ACCESS,
++							  time.tv_sec);
++			g_file_info_set_attribute_uint32 (info,
++							  G_FILE_ATTRIBUTE_TIME_ACCESS_USEC,
++							  time.tv_usec);
++			d(g_print ("Accessed: '%s' = '%d'\n", 
++				   value, (int)time.tv_sec));
++		}
++		else if (strcmp (name, "user-perm") == 0) {
++			/* The permissions don't map well to unix semantics,
++			 * since the user is most likely not the same on both
++			 * sides. We map the user permissions to "other" on the
++			 * local side. D is treated as write, otherwise files
++			 * can't be deleted through the module, even if it
++			 * should be possible.
++			 */
++			if (strstr (value, "R")) {
++				g_file_info_set_attribute_boolean (info,
++								   G_FILE_ATTRIBUTE_ACCESS_CAN_READ,
++								   TRUE);
++			}
++			if (strstr (value, "W") || strstr (value, "D")) {
++				g_file_info_set_attribute_boolean (info,
++								   G_FILE_ATTRIBUTE_ACCESS_CAN_WRITE,
++								   TRUE);
++			}
++		}
++		else if (strcmp (name, "group-perm") == 0) {
++			/* Ignore for now */
++			d(g_print ("Group permissions: '%s'\n", value));
++		}
++		else if (strcmp (name, "other-perm") == 0) {
++			/* Ignore for now */
++			d(g_print ("Other permissions: '%s'\n", value));
++		}
++		else if (strcmp (name, "owner") == 0) {
++			/* Ignore for now */
++			d(g_print ("Owner: '%s'\n", value));
++		}
++		else if (strcmp (name, "group") == 0) {
++			/* Ignore for now */
++			d(g_print ("Group: '%s'\n", value));
++		}
++		else if (strcmp (name, "type") == 0) {
++			g_file_info_set_content_type (info, value);
++			d(g_print ("Mime-Type: '%s'\n", value));
++		}
++		else if (strcmp (name, "xml:lang") == 0) {
++			d(g_print ("Lang: '%s'\n", value));
++		}
++		else if (strcmp (name, "mem-type") == 0) {
++			guint device;
++
++			if (value == NULL || value[0] == '\0')
++				continue;
++
++			device = om_mem_type_id_from_string (value);
++			g_file_info_set_attribute_uint32 (info,
++							 G_FILE_ATTRIBUTE_UNIX_RDEV,
++							 device);
++			d(g_print ("Mem-Type: '%s' (%d)\n",
++				   value, device));
++		}
++		else {
++			d(g_print ("Unknown Attribute: %s = %s\n",
++				   name, value));
++		}
++	}
++
++	if (g_file_info_get_name (info) == NULL) { /* Required attribute */
++		/* Set error */
++		return FALSE;
++	}
++	
++	return TRUE;
++}
++
++static void
++fl_parser_free_parser_data (ParserData *data, gboolean free_list)
++{
++	if (free_list) {
++		g_list_free_full (data->elements, g_object_unref);
++		data->elements = NULL;
++	}
++
++	g_free (data);
++}
++
++gboolean
++gvfsbackendobexftp_fl_parser_parse (const gchar *buf, gint len, GList **elements,
++				    GError **error)
++{
++	ParserData *data;
++	XML_Parser  parser;
++
++	data = g_new0 (ParserData, 1);
++	data->error = error;
++	data->elements = NULL;
++	data->depth = 0;
++
++	parser = fl_parser_create_context (data);
++	if (!parser) {
++		g_free (data);
++		return FALSE;
++	}
++
++	if (XML_Parse (parser, buf, len, TRUE) == 0) {
++		XML_ParserFree (parser);
++		fl_parser_free_parser_data (data, TRUE);
++
++		if (*error == NULL) {
++			g_set_error_literal (error,
++					     G_MARKUP_ERROR,
++					     G_MARKUP_ERROR_INVALID_CONTENT,
++					     "Couldn't parse the incoming data");
++		}
++		return FALSE;
++	}
++
++	XML_ParserFree (parser);
++	
++	*elements = data->elements;
++
++	fl_parser_free_parser_data (data, FALSE);
++		
++	return TRUE;
++}
++
++static GPtrArray *mem_types = NULL;
++static GHashTable *mem_types_ht = NULL;
++
++guint
++om_mem_type_id_from_string (const gchar *memtype)
++{
++	guint mem_id;
++	gchar *value;
++
++	if (memtype == NULL || memtype[0] == '\0')
++		return 0;
++
++	if (mem_types_ht != NULL) {
++		mem_id = GPOINTER_TO_UINT (g_hash_table_lookup
++					   (mem_types_ht, memtype));
++		if (mem_id != 0)
++			return mem_id;
++	} else {
++		mem_types = g_ptr_array_new ();
++		/* Insert a dummy entry, so that we don't use 0 as a mem_id */
++		g_ptr_array_add (mem_types, NULL);
++		mem_types_ht = g_hash_table_new (g_str_hash, g_str_equal);
++	}
++	value = g_strdup (memtype);
++	mem_id = mem_types->len;
++	g_ptr_array_add (mem_types, value);
++	g_hash_table_insert (mem_types_ht, value, GUINT_TO_POINTER (mem_id));
++	return mem_id;
++}
++
++const gchar *
++om_mem_type_id_to_string (guint mem_id)
++{
++	if (mem_types == NULL || mem_id >= mem_types->len)
++		return NULL;
++	else
++		return g_ptr_array_index (mem_types, mem_id);
++}
+Index: b/daemon/gvfsbackendobexftp-fl-parser.h
+===================================================================
+--- /dev/null
++++ b/daemon/gvfsbackendobexftp-fl-parser.h
+@@ -0,0 +1,37 @@
++/*
++ * Copyright (C) 2004 Nokia Corporation.
++ * Copyright (C) 2008 Bastien Nocera <hadess@hadess.net> (gio port)
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public License as
++ * published by the Free Software Foundation; version 2 of the
++ * License.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this program; if not, write to the
++ * Free Software Foundation, Inc., 51 Franklin Street - Fifth Floor,
++ * Boston, MA 02110-1301, USA.
++ */
++
++#ifndef __GVFSBACKENDOBEXFTP_FL_PARSER_H__
++#define __GVFSBACKENDOBEXFTP_FL_PARSER_H__
++
++#include <glib.h>
++
++gboolean     gvfsbackendobexftp_fl_parser_parse             (const gchar *buf,
++							     gint         len,
++							     GList      **elements,
++							     GError     **error);
++void         gvfsbackendobexftp_fl_parser_free_element_list (GSList      *elements);
++
++
++
++guint        om_mem_type_id_from_string     (const gchar *memtype);
++const gchar *om_mem_type_id_to_string       (guint        mem_id);
++
++#endif /* __GVFSBACKENDOBEXFTP_FL_PARSER_H__ */
+Index: b/daemon/gvfsbackendobexftp.c
+===================================================================
+--- /dev/null
++++ b/daemon/gvfsbackendobexftp.c
+@@ -0,0 +1,2183 @@
++/* GIO - GLib Input, Output and Streaming Library
++ * 
++ * Copyright (C) 2006-2008 Red Hat, Inc.
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General
++ * Public License along with this library; if not, write to the
++ * Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
++ * Boston, MA 02110-1301, USA.
++ *
++ * Authors: Bastien Nocera <hadess@hadess.net>
++ *          Cosimo Cecchi  <cosimoc@gnome.org>
++ */
++
++#include <config.h>
++
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <errno.h>
++#include <unistd.h>
++#include <fcntl.h>
++#include <string.h>
++#include <stdlib.h>
++
++#include <glib/gstdio.h>
++#include <glib/gi18n.h>
++#include <gio/gio.h>
++#if defined(HAVE_HAL)
++  #include <libhal.h>
++#endif	
++#include <dbus/dbus-glib.h>
++#include <dbus/dbus-glib-bindings.h>
++#include <dbus/dbus-glib-lowlevel.h>
++#include <bluetooth/bluetooth.h>
++
++#include "gvfsbackendobexftp.h"
++#include "gvfsbackendobexftp-fl-parser.h"
++#include "gvfsbackendobexftp-cap-parser.h"
++#include "obexftp-marshal.h"
++
++#include "gvfsjobopenforread.h"
++#include "gvfsjobread.h"
++#include "gvfsjobseekread.h"
++#include "gvfsjobmount.h"
++#include "gvfsjobopenforwrite.h"
++#include "gvfsjobwrite.h"
++#include "gvfsjobclosewrite.h"
++#include "gvfsjobseekwrite.h"
++#include "gvfsjobsetdisplayname.h"
++#include "gvfsjobqueryinfo.h"
++#include "gvfsjobqueryfsinfo.h"
++#include "gvfsjobqueryattributes.h"
++#include "gvfsjobenumerate.h"
++#include "gvfsdaemonprotocol.h"
++
++#define BDADDR_LEN 17
++
++#define ASYNC_SUCCESS 2
++#define ASYNC_RUNNING 1
++#define ASYNC_PENDING 0
++#define ASYNC_ERROR -1
++
++#define CACHE_LIFESPAN 3
++
++struct _GVfsBackendObexftp
++{
++  GVfsBackend parent_instance;
++
++  char *display_name;
++  char *bdaddr;
++  char *icon_name;
++  char *symbolic_icon_name;
++  gint usbintfnum;
++
++  DBusGConnection *connection;
++  DBusGProxy *manager_proxy;
++  DBusGProxy *session_proxy;
++
++  /* Use for the async notifications and errors */
++  GCond cond;
++  GMutex mutex;
++  int status;
++  gboolean doing_io;
++  GError *error;
++
++  /* Folders listing cache */
++  char *files_listing;
++  char *directory;
++  time_t time_captured;
++};
++
++typedef struct {
++    char *source;
++    goffset size;
++    int fd;
++} ObexFTPOpenHandle;
++
++G_DEFINE_TYPE (GVfsBackendObexftp, g_vfs_backend_obexftp, G_VFS_TYPE_BACKEND);
++
++static void session_connect_error_cb (DBusGProxy *proxy,
++                                      const char *session_object,
++                                      const gchar *error_name,
++                                      const gchar *error_message,
++                                      gpointer user_data);
++static void session_connected_cb (DBusGProxy *proxy,
++                                  const char *session_object,
++                                  gpointer user_data);
++
++/* Parse USB paths from do_mount(), or obex-data-server */
++static gboolean
++_get_numbers_from_usb_path (const char *path, int *usb_bus_num, int *usb_device_num, int *usb_intf_num)
++{
++  char **tokens;
++  char *endp;
++  gboolean has_brackets = FALSE;
++
++  if (path == NULL)
++    return FALSE;
++  if (*path == '[')
++    {
++      path++;
++      has_brackets = TRUE;
++    }
++
++  tokens = g_strsplit (path + 4, ",", 0);
++  if (g_strv_length (tokens) != 3)
++    {
++      g_strfreev (tokens);
++      return FALSE;
++    }
++
++ *usb_bus_num = strtol (tokens[0], &endp, 10);
++  if (*endp != '\0')
++    {
++      g_strfreev (tokens);
++      return FALSE;
++    }
++
++  *usb_device_num = strtol (tokens[1], &endp, 10);
++  if (*endp != '\0')
++    {
++      g_strfreev (tokens);
++      return FALSE;
++    }
++
++  *usb_intf_num = strtol (tokens[2], &endp, 10);
++  if ((has_brackets && *endp != ']') || (!has_brackets && *endp != '\0'))
++    {
++      g_strfreev (tokens);
++      return FALSE;
++    }
++
++  g_strfreev (tokens);
++
++  return TRUE;
++}
++
++/* Used to detect broken listings from
++ * old Nokia 3650s */
++static gboolean
++_is_nokia_3650 (const char *bdaddr)
++{
++  if (!bdaddr)
++    return FALSE;
++
++  /* Don't ask, Nokia seem to use a Bluetooth
++   * HCI from Murata */
++  return g_str_has_prefix(bdaddr, "00:60:57");
++}
++
++static char *
++_get_bluetooth_name_and_icon (DBusGProxy *device,
++                              char      **icon_name,
++                              char      **symbolic_icon_name)
++{
++  GHashTable *hash;
++
++  if (dbus_g_proxy_call (device, "GetProperties", NULL,
++                         G_TYPE_INVALID, dbus_g_type_get_map ("GHashTable", G_TYPE_STRING, G_TYPE_VALUE),
++                         &hash, G_TYPE_INVALID) != FALSE)
++    {
++      GValue *value;
++      char *name;
++
++      value = g_hash_table_lookup (hash, "Alias");
++      name = value ? g_value_dup_string(value) : NULL;
++
++      value = g_hash_table_lookup (hash, "Icon");
++      if (value)
++        {
++          *icon_name = g_value_dup_string (value);
++        }
++      else
++        {
++          *icon_name = g_strdup ("bluetooth");
++        }
++
++      *symbolic_icon_name = g_strdup ("bluetooth-symbolic");
++
++      g_hash_table_destroy (hash);
++      return name;
++    }
++
++  return NULL;
++}
++
++
++#define _DBUS_POINTER_SHIFT(p)   ((void*) (((char*)p) + sizeof (void*)))
++#define DBUS_G_CONNECTION_FROM_CONNECTION(x)     ((DBusGConnection*) _DBUS_POINTER_SHIFT(x))
++
++static gchar *
++_get_bluetooth_device_properties (const char *bdaddr,
++                                  char      **icon_name,
++                                  char      **symbolic_icon_name)
++{
++  DBusConnection *conn;
++  DBusGProxy *manager;
++  GPtrArray *adapters;
++  gchar *name;
++  guint i;
++
++  name = NULL;
++
++  conn = dbus_bus_get_private (DBUS_BUS_SYSTEM, NULL);
++  if (conn == NULL)
++        return name;
++
++  manager = dbus_g_proxy_new_for_name (DBUS_G_CONNECTION_FROM_CONNECTION(conn), "org.bluez",
++                                       "/", "org.bluez.Manager");
++  if (manager == NULL)
++    {
++      dbus_connection_close (conn);
++      dbus_connection_unref (conn);
++      return name;
++    }
++
++  if (dbus_g_proxy_call (manager, "ListAdapters", NULL, G_TYPE_INVALID, dbus_g_type_get_collection ("GPtrArray", DBUS_TYPE_G_OBJECT_PATH), &adapters, G_TYPE_INVALID) == FALSE)
++    {
++      g_object_unref (manager);
++      dbus_connection_close (conn);
++      dbus_connection_unref (conn);
++      return name;
++    }
++
++  for (i = 0; i < adapters->len && name == NULL; i++)
++    {
++      DBusGProxy *adapter;
++      char *device_path;
++
++      adapter = dbus_g_proxy_new_for_name (DBUS_G_CONNECTION_FROM_CONNECTION(conn), "org.bluez",
++                                           g_ptr_array_index (adapters, i), "org.bluez.Adapter");
++      if (dbus_g_proxy_call (adapter, "FindDevice", NULL,
++                             G_TYPE_STRING, bdaddr, G_TYPE_INVALID,
++                             DBUS_TYPE_G_OBJECT_PATH, &device_path, G_TYPE_INVALID) != FALSE)
++        {
++          DBusGProxy *device;
++          device = dbus_g_proxy_new_for_name (DBUS_G_CONNECTION_FROM_CONNECTION(conn), "org.bluez", device_path, "org.bluez.Device");
++          name = _get_bluetooth_name_and_icon (device, icon_name, symbolic_icon_name);
++          g_object_unref (device);
++        }
++      g_object_unref (adapter);
++    }
++
++  g_ptr_array_free (adapters, TRUE);
++  g_object_unref (manager);
++  dbus_connection_close (conn);
++  dbus_connection_unref (conn);
++
++  return name;
++}
++
++#ifdef HAVE_HAL
++static gboolean
++_is_same_path (const char *path, int usb_bus_num, int usb_device_num, int usb_intf_num)
++{
++  int bus, dev, intf;
++
++  if (!_get_numbers_from_usb_path (path, &bus, &dev, &intf))
++    return FALSE;
++
++  if (bus == usb_bus_num &&
++      dev == usb_device_num &&
++      intf == usb_intf_num)
++        return TRUE;
++
++  return FALSE;
++}
++
++static int
++_find_ods_usb_intfnum (DBusGProxy *obex_manager, int device_usb_bus_num, int device_usb_device_num, int device_usb_interface_num)
++{
++  int i, n;
++  GHashTable *hash;
++
++  if (obex_manager == NULL)
++    return -1;
++
++  if (dbus_g_proxy_call (obex_manager, "GetUsbInterfacesNum", NULL, G_TYPE_INVALID, G_TYPE_UINT, &n, G_TYPE_INVALID) == FALSE)
++    return -1;
++
++  for (i = 0; i < n; i++) 
++    {
++      if (dbus_g_proxy_call (obex_manager, "GetUsbInterfaceInfo", NULL,
++                             G_TYPE_UINT, i, G_TYPE_INVALID,
++                             DBUS_TYPE_G_STRING_STRING_HASHTABLE, &hash, 
++                             G_TYPE_INVALID) != FALSE)
++        {
++          const char* ods_path = g_hash_table_lookup (hash, "Path");
++
++          if (ods_path == NULL)
++            {
++              g_hash_table_destroy (hash);
++              return -2;
++            }
++
++          if (_is_same_path (ods_path, device_usb_bus_num, device_usb_device_num, device_usb_interface_num))
++            {
++              g_hash_table_destroy (hash);
++              return i;
++            }
++          g_hash_table_destroy (hash);
++        }
++    }
++  return -1;
++}
++#endif
++
++static gint
++_get_usb_intfnum_and_properties (DBusGProxy *obex_manager,
++                                 const char *device,
++                                 char      **display_name,
++                                 char      **icon_name,
++                                 char      **symbolic_icon_name)
++{
++  int usb_bus_num;
++  int usb_device_num;
++  int usb_intf_num;
++#ifdef HAVE_HAL
++  char **obex_devices;
++  int num_obex_devices;
++  int n;
++  DBusError dbus_error;
++  DBusConnection *dbus_connection;
++  LibHalContext *hal_ctx;
++#endif
++  int ods_intf_num = 1;
++
++  /* Parse the [usb:1,41,3] string */
++  if (!g_str_has_prefix (device, "[usb:"))
++    {
++      return -1;
++    }
++
++  if (!_get_numbers_from_usb_path (device, &usb_bus_num, &usb_device_num, &usb_intf_num))
++    return -1;
++
++  g_message ("Parsed '%s' into bus=%d device=%d interface=%d", device, usb_bus_num, usb_device_num, usb_intf_num);
++
++#ifdef HAVE_HAL
++  dbus_error_init (&dbus_error);
++  dbus_connection = dbus_bus_get_private (DBUS_BUS_SYSTEM, &dbus_error);
++  if (dbus_error_is_set (&dbus_error))
++    {
++      dbus_error_free (&dbus_error);
++      return -1;
++    }
++  dbus_connection_set_exit_on_disconnect (dbus_connection, FALSE);
++
++  hal_ctx = libhal_ctx_new ();
++  if (hal_ctx == NULL)
++    {
++      dbus_connection_close (dbus_connection);
++      dbus_connection_unref (dbus_connection);
++      dbus_error_free (&dbus_error);
++      return -1;
++    }
++
++  libhal_ctx_set_dbus_connection (hal_ctx, dbus_connection);
++  if (!libhal_ctx_init (hal_ctx, &dbus_error))
++    {
++      libhal_ctx_free (hal_ctx);
++      dbus_connection_close (dbus_connection);
++      dbus_connection_unref (dbus_connection);
++      dbus_error_free (&dbus_error);
++      return -1;
++    }
++  obex_devices = libhal_find_device_by_capability (hal_ctx, "obex", &num_obex_devices, NULL);
++
++  for (n = 0; n < num_obex_devices; n++)
++    {
++      char *udi = obex_devices[n];
++      LibHalPropertySet *ps;
++
++      ps = libhal_device_get_all_properties (hal_ctx, udi, NULL);
++      if (ps != NULL)
++        {
++          const char *subsystem;
++
++          subsystem = libhal_ps_get_string (ps, "info.subsystem");
++          if (subsystem != NULL && strcmp (subsystem, "usb") == 0)
++            {
++              int device_usb_bus_num;
++              int device_usb_device_num;
++              int device_usb_interface_num;
++              const char *icon_from_hal;
++              const char *name_from_hal;
++
++              device_usb_bus_num = libhal_ps_get_int32 (ps, "usb.bus_number");
++              device_usb_device_num = libhal_ps_get_int32 (ps, "usb.linux.device_number");
++              device_usb_interface_num = libhal_ps_get_int32 (ps, "usb.interface.number");
++              icon_from_hal = libhal_ps_get_string (ps, "info.desktop.icon");
++              name_from_hal = libhal_ps_get_string (ps, "info.desktop.name");
++
++              g_message ("looking at usb device '%s' with bus=%d, device=%d interface=%d", 
++                     udi, device_usb_bus_num, device_usb_device_num, device_usb_interface_num);
++
++              if (device_usb_bus_num == usb_bus_num &&
++                  device_usb_device_num == usb_device_num &&
++                  device_usb_interface_num == usb_intf_num)
++                {
++                  const char *parent_udi;
++
++                  g_message ("udi '%s' matches %s", udi, device);
++                  parent_udi = libhal_ps_get_string (ps, "info.parent");
++
++                  if (parent_udi != NULL)
++                    {
++                      LibHalPropertySet *ps2;
++
++                      ps2 = libhal_device_get_all_properties (hal_ctx, parent_udi, NULL);
++                      if (ps2 != NULL)
++                        {
++                          ods_intf_num = _find_ods_usb_intfnum (obex_manager,
++                                                                device_usb_bus_num,
++                                                                device_usb_device_num,
++                                                                device_usb_interface_num);
++
++                          if (ods_intf_num >= 0)
++                            {
++                              if (icon_from_hal != NULL)
++                                *icon_name = g_strdup (icon_from_hal);
++                              else
++                                *icon_name = "drive-removable-media-usb";
++
++                              *symbolic_icon_name = g_strdup ("drive-removable-media-symbolic");
++
++                              if (name_from_hal != NULL)
++                                *display_name = g_strdup (name_from_hal);
++                              else
++                                *display_name = g_strdup_printf ("%s - %s",
++                                                                 libhal_ps_get_string (ps2, "usb_device.vendor"),
++                                                                 libhal_ps_get_string (ps2, "usb_device.product"));
++
++                              libhal_free_property_set (ps2);
++                              libhal_free_property_set (ps);
++
++                              goto end;
++                            }
++                          else if (ods_intf_num == -2)
++                            {
++                              libhal_free_property_set (ps2);
++                              libhal_free_property_set (ps);
++
++                              goto end;
++                            }
++                          libhal_free_property_set (ps2);
++                        }
++                    }
++                }
++            }
++          libhal_free_property_set (ps);
++        }
++    }
++
++end:
++  libhal_free_string_array (obex_devices);
++  libhal_ctx_free (hal_ctx);
++
++  dbus_connection_close (dbus_connection);
++  dbus_connection_unref (dbus_connection);
++  dbus_error_free (&dbus_error);
++#endif /* HAVE_HAL */
++
++  return ods_intf_num;
++}
++
++static void
++g_vfs_backend_obexftp_finalize (GObject *object)
++{
++  GVfsBackendObexftp *backend;
++
++  backend = G_VFS_BACKEND_OBEXFTP (object);
++
++  g_free (backend->display_name);
++  g_free (backend->bdaddr);
++  g_free (backend->icon_name);
++  g_free (backend->symbolic_icon_name);
++  g_free (backend->files_listing);
++  g_free (backend->directory);
++
++  if (backend->session_proxy != NULL)
++        g_object_unref (backend->session_proxy);
++  g_mutex_clear (&backend->mutex);
++  g_cond_clear (&backend->cond);
++
++  if (G_OBJECT_CLASS (g_vfs_backend_obexftp_parent_class)->finalize)
++        (*G_OBJECT_CLASS (g_vfs_backend_obexftp_parent_class)->finalize) (object);
++}
++
++static void
++g_vfs_backend_obexftp_init (GVfsBackendObexftp *backend)
++{
++  DBusConnection *conn;
++  DBusGConnection *connection;
++  DBusError error;
++
++  /* Otherwise dbus-glib doesn't setup it value types */
++  connection = dbus_g_bus_get (DBUS_BUS_SESSION, NULL);
++
++  if (connection != NULL)
++        dbus_g_connection_unref (connection);
++
++  /* Connect to the session bus via a private connection */
++  dbus_error_init (&error);
++  conn = dbus_bus_get_private (DBUS_BUS_SESSION, &error);
++  if (conn == NULL) {
++      g_printerr ("Connecting to session bus failed: %s\n", error.message);
++      dbus_error_free (&error);
++      return;
++  }
++  dbus_connection_setup_with_g_main (conn, NULL);
++
++  backend->connection = dbus_connection_get_g_connection (conn);
++  if (backend->connection == NULL) {
++      g_printerr ("Connecting to session bus failed\n");
++      return;
++  }
++
++  g_mutex_init (&backend->mutex);
++  g_cond_init (&backend->cond);
++
++  backend->manager_proxy = dbus_g_proxy_new_for_name (backend->connection,
++                                                      "org.openobex",
++                                                      "/org/openobex",
++                                                      "org.openobex.Manager");
++
++  dbus_g_proxy_add_signal(backend->manager_proxy, "SessionConnectError",
++                          DBUS_TYPE_G_OBJECT_PATH, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_INVALID);
++  dbus_g_proxy_connect_signal(backend->manager_proxy, "SessionConnectError",
++                              G_CALLBACK(session_connect_error_cb), backend, NULL);
++  dbus_g_proxy_add_signal(backend->manager_proxy, "SessionConnected",
++                          DBUS_TYPE_G_OBJECT_PATH, G_TYPE_INVALID);
++  dbus_g_proxy_connect_signal(backend->manager_proxy, "SessionConnected",
++                              G_CALLBACK(session_connected_cb), backend, NULL);
++}
++
++static gboolean
++_change_directory (GVfsBackendObexftp *op_backend,
++                     const char *filename,
++                     GError **error)
++{
++  char *current_path, **req_components;
++  guint i;
++
++  if (dbus_g_proxy_call (op_backend->session_proxy, "GetCurrentPath", error,
++                         G_TYPE_INVALID,
++                         G_TYPE_STRING, &current_path, G_TYPE_INVALID) == FALSE)
++    {
++      g_message ("GetCurrentPath failed");
++      return FALSE;
++    }
++
++  if (strcmp (filename, current_path) == 0)
++    {
++      g_free (current_path);
++      return TRUE;
++    }
++
++  /* Are we already at the root? */
++  if (strcmp (current_path, "/") != 0)
++    {
++      if (dbus_g_proxy_call (op_backend->session_proxy, "ChangeCurrentFolderToRoot", error,
++                             G_TYPE_INVALID,
++                             G_TYPE_INVALID) == FALSE)
++        {
++          g_message ("ChangeCurrentFolderToRoot failed");
++          //FIXME change the retval from org.openobex.Error.NotAuthorized to
++          //no such file or directory
++          return FALSE;
++        }
++    }
++  g_free (current_path);
++
++  /* If we asked for the root, we're done */
++  if (strcmp (filename, "/") == 0)
++        return TRUE;
++
++  req_components = g_strsplit (filename, "/", -1);
++  for (i = 0; req_components[i] != NULL; i++)
++    {
++      if (*req_components[i] == '\0')
++            continue;
++      if (dbus_g_proxy_call (op_backend->session_proxy, "ChangeCurrentFolder", error,
++                             G_TYPE_STRING, req_components[i], G_TYPE_INVALID,
++                             G_TYPE_INVALID) == FALSE)
++        {
++          g_message ("ChangeCurrentFolder failed");
++          g_strfreev (req_components);
++          return FALSE;
++        }
++    }
++
++  g_strfreev (req_components);
++
++  return TRUE;
++}
++
++static gboolean
++_retrieve_folder_listing (GVfsBackend *backend,
++                          const char *filename,
++                          char **files,
++                          GError **error)
++{
++  GVfsBackendObexftp *op_backend = G_VFS_BACKEND_OBEXFTP (backend);
++  time_t current;
++
++  current = time (NULL);
++
++  if (op_backend->directory != NULL &&
++      strcmp (op_backend->directory, filename) == 0 &&
++      op_backend->time_captured > current - CACHE_LIFESPAN)
++    {
++      *files = g_strdup (op_backend->files_listing);
++      return TRUE;
++    }
++  else
++    {
++      g_free (op_backend->directory);
++      op_backend->directory = NULL;
++      g_free (op_backend->files_listing);
++      op_backend->files_listing = NULL;
++    }
++
++  if (dbus_g_proxy_call (op_backend->session_proxy, "RetrieveFolderListing", error,
++                         G_TYPE_INVALID,
++                         G_TYPE_STRING, files, G_TYPE_INVALID) == FALSE)
++    {
++      return FALSE;
++    }
++
++  op_backend->directory = g_strdup (filename);
++  op_backend->files_listing = g_strdup (*files);
++  op_backend->time_captured = time (NULL);
++
++  return TRUE;
++}
++
++static gboolean
++_query_file_info_helper (GVfsBackend *backend,
++                         const char *filename,
++                         GFileInfo *info,
++                         GError **error)
++{
++  GVfsBackendObexftp *op_backend = G_VFS_BACKEND_OBEXFTP (backend);
++  char *parent, *basename, *files;
++  GList *elements, *l;
++  gboolean found;
++
++  g_debug ("+ _query_file_info_helper, filename: %s\n", filename);
++
++  if (strcmp (filename, "/") == 0)
++    {
++      char *display;
++
++      /* That happens when you want '/'
++       * and we don't have any info about it :( */
++      g_file_info_set_file_type (info, G_FILE_TYPE_DIRECTORY);
++      g_file_info_set_content_type (info, "inode/directory");
++      g_file_info_set_name (info, "/");
++      if (op_backend->icon_name) {
++          GIcon *icon;
++
++          g_vfs_backend_set_icon_name (backend, op_backend->icon_name);
++          icon = g_themed_icon_new (op_backend->icon_name);
++          g_file_info_set_icon (info, icon);
++          g_object_unref (icon);
++      }
++      if (op_backend->symbolic_icon_name) {
++          GIcon *icon;
++
++          g_vfs_backend_set_icon_name (backend, op_backend->symbolic_icon_name);
++          icon = g_themed_icon_new (op_backend->symbolic_icon_name);
++          g_file_info_set_symbolic_icon (info, icon);
++          g_object_unref (icon);
++      }
++      display = g_strdup_printf (_("%s on %s"), "/", op_backend->display_name);
++      g_file_info_set_display_name (info, display);
++      g_free (display);
++      return TRUE;
++    }
++
++  parent = g_path_get_dirname (filename);
++  if (_change_directory (op_backend, parent, error) == FALSE)
++    {
++      g_free (parent);
++      return FALSE;
++    }
++
++  files = NULL;
++  if (_retrieve_folder_listing (backend, parent, &files, error) == FALSE)
++    {
++      g_free (parent);
++      return FALSE;
++    }
++
++  g_free (parent);
++
++  if (gvfsbackendobexftp_fl_parser_parse (files, strlen (files), &elements, error) == FALSE)
++    {
++      g_free (files);
++      return FALSE;
++    }
++  g_free (files);
++
++  basename = g_path_get_basename (filename);
++  found = FALSE;
++
++  for (l = elements; l != NULL; l = l->next)
++    {
++      if (strcmp (basename, g_file_info_get_name (l->data)) == 0)
++        {
++          g_file_info_copy_into (l->data, info);
++          found = TRUE;
++          break;
++        }
++    }
++
++  if (found == FALSE)
++    {
++      g_set_error_literal (error, G_IO_ERROR,
++	                   G_IO_ERROR_NOT_FOUND,
++        	           g_strerror (ENOENT));
++    }
++
++  g_free (basename);
++  g_list_free_full (elements, g_object_unref);
++
++  g_debug ("- _query_file_info_helper\n");
++
++  return found;
++}
++
++static void
++_invalidate_cache_helper (GVfsBackendObexftp *op_backend)
++{
++  g_free (op_backend->directory);
++  op_backend->directory = NULL;
++}
++
++static void
++error_occurred_cb (DBusGProxy *proxy, const gchar *error_name, const gchar *error_message, gpointer user_data)
++{
++  GVfsBackendObexftp *op_backend = G_VFS_BACKEND_OBEXFTP (user_data);
++
++  g_message("ErrorOccurred");
++  g_message("Error name: %s", error_name);
++  g_message("Error message: %s", error_message);
++
++  if (strcmp (error_name, "org.openobex.Error.LinkError") == 0)
++    {
++      g_message ("link lost to remote device");
++      g_vfs_backend_force_unmount ((GVfsBackend*)op_backend);
++      return;
++    }
++
++  /* Something is waiting on us */
++  g_mutex_lock (&op_backend->mutex);
++  if (op_backend->doing_io)
++    {
++      op_backend->status = ASYNC_ERROR;
++      op_backend->error = g_error_new_literal (DBUS_GERROR,
++                                               DBUS_GERROR_REMOTE_EXCEPTION,
++                                               error_message);
++      g_cond_signal (&op_backend->cond);
++      g_mutex_unlock (&op_backend->mutex);
++      return;
++    }
++  g_mutex_unlock (&op_backend->mutex);
++
++  g_message ("Unhandled error, file a bug");
++  g_vfs_backend_force_unmount ((GVfsBackend*)op_backend);
++}
++
++static void
++session_connect_error_cb (DBusGProxy *proxy,
++                          const char *session_object,
++                          const gchar *error_name,
++                          const gchar *error_message,
++                          gpointer user_data)
++{
++  GVfsBackendObexftp *op_backend = G_VFS_BACKEND_OBEXFTP (user_data);
++
++  g_mutex_lock (&op_backend->mutex);
++  op_backend->status = ASYNC_ERROR;
++  op_backend->error = g_error_new_literal (DBUS_GERROR,
++                                           DBUS_GERROR_REMOTE_EXCEPTION,
++                                           error_message);
++  g_cond_signal (&op_backend->cond);
++  g_mutex_unlock (&op_backend->mutex);
++}
++
++static void
++session_connected_cb (DBusGProxy *proxy,
++                      const char *session_object,
++                      gpointer user_data)
++{
++  GVfsBackendObexftp *op_backend = G_VFS_BACKEND_OBEXFTP (user_data);
++
++  g_mutex_lock (&op_backend->mutex);
++  op_backend->status = ASYNC_SUCCESS;
++  g_cond_signal (&op_backend->cond);
++  g_mutex_unlock (&op_backend->mutex);
++}
++
++static void
++cancelled_cb (DBusGProxy *proxy, gpointer user_data)
++{
++  GVfsBackendObexftp *op_backend = G_VFS_BACKEND_OBEXFTP (user_data);
++
++  g_message ("transfer got cancelled");
++
++  g_mutex_lock (&op_backend->mutex);
++  op_backend->status = ASYNC_ERROR;
++  g_cond_signal (&op_backend->cond);
++  g_mutex_unlock (&op_backend->mutex);
++}
++
++static void
++disconnected_cb (DBusGProxy *proxy, gpointer user_data)
++{
++  GVfsBackendObexftp *op_backend = G_VFS_BACKEND_OBEXFTP (user_data);
++
++  g_message ("disconnected_cb");
++  g_vfs_backend_force_unmount ((GVfsBackend*)op_backend);
++}
++
++static void
++closed_cb (DBusGProxy *proxy, gpointer user_data)
++{
++  GVfsBackendObexftp *op_backend = G_VFS_BACKEND_OBEXFTP (user_data);
++
++  g_message ("closed_cb");
++  g_vfs_backend_force_unmount ((GVfsBackend*)op_backend);
++}
++
++static void
++do_mount (GVfsBackend *backend,
++          GVfsJobMount *job,
++          GMountSpec *mount_spec,
++          GMountSource *mount_source,
++          gboolean is_automount)
++{
++  GVfsBackendObexftp *op_backend = G_VFS_BACKEND_OBEXFTP (backend);
++  const char *device;
++  GError *error = NULL;
++  const gchar *path = NULL;
++  GMountSpec *obexftp_mount_spec;
++  guint count;
++
++  g_debug ("+ do_mount\n");
++
++  device = g_mount_spec_get (mount_spec, "host");
++
++  if (device == NULL || (strlen (device) != BDADDR_LEN + 2 && !g_str_has_prefix(device, "[usb:")) )
++    {
++      g_vfs_job_failed (G_VFS_JOB (job),
++                        G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
++                        _("Invalid mount spec"));
++      return;
++    }
++
++  op_backend->bdaddr = NULL;
++  op_backend->usbintfnum = -1;
++
++  if (!g_str_has_prefix(device, "[usb:"))
++    {
++      /* Strip the brackets */
++      op_backend->bdaddr = g_strndup (device + 1, BDADDR_LEN);
++      if (bachk (op_backend->bdaddr) < 0)
++        {
++          g_free (op_backend->bdaddr);
++          g_vfs_job_failed (G_VFS_JOB (job),
++                            G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
++                            _("Invalid mount spec"));
++          return;
++        }
++    }
++  else
++    {
++      op_backend->usbintfnum = _get_usb_intfnum_and_properties (op_backend->manager_proxy, device, &op_backend->display_name, &op_backend->icon_name, &op_backend->symbolic_icon_name);
++      if (op_backend->usbintfnum < 0)
++        {
++          if (op_backend->usbintfnum == -2)
++            {
++              g_vfs_job_failed (G_VFS_JOB (job),
++                                G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
++                                _("USB support missing. Please contact your software vendor"));
++            }
++          else
++            {
++              g_vfs_job_failed (G_VFS_JOB (job),
++                                G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
++                                _("Invalid mount spec"));
++            }
++          return;
++        }
++    }
++
++  /* FIXME, Have a way for the mount to be cancelled, see:
++   * Use CancelSessionConnect */
++  op_backend->status = ASYNC_PENDING;
++
++  if (op_backend->bdaddr)
++    {
++      if (dbus_g_proxy_call (op_backend->manager_proxy, "CreateBluetoothSession", &error,
++                             G_TYPE_STRING, op_backend->bdaddr, G_TYPE_STRING, "00:00:00:00:00:00", G_TYPE_STRING, "ftp", G_TYPE_INVALID,
++                             DBUS_TYPE_G_OBJECT_PATH, &path, G_TYPE_INVALID) == FALSE)
++        {
++          g_free (op_backend->bdaddr);
++          g_vfs_job_failed_from_error (G_VFS_JOB (job), error);
++          g_error_free (error);
++          return;
++        }
++      op_backend->display_name = _get_bluetooth_device_properties (op_backend->bdaddr, &op_backend->icon_name, &op_backend->symbolic_icon_name);
++      if (!op_backend->display_name)
++        op_backend->display_name = g_strdelimit (g_strdup (op_backend->bdaddr), ":", '-');
++      if (!op_backend->icon_name)
++        op_backend->icon_name = g_strdup ("bluetooth");
++      if (!op_backend->symbolic_icon_name)
++        op_backend->symbolic_icon_name = g_strdup ("bluetooth-symbolic");
++      g_debug ("  do_mount: %s (%s) mounted\n", op_backend->display_name, op_backend->bdaddr);
++    }
++  else
++    {
++      if (dbus_g_proxy_call (op_backend->manager_proxy, "CreateUsbSession", &error,
++                             G_TYPE_UINT, op_backend->usbintfnum, G_TYPE_STRING, "ftp", G_TYPE_INVALID,
++                             DBUS_TYPE_G_OBJECT_PATH, &path, G_TYPE_INVALID) == FALSE)
++        {
++          g_vfs_job_failed_from_error (G_VFS_JOB (job), error);
++          g_error_free (error);
++          return;
++        }
++      g_debug ("  do_mount: usb interface %d mounted\n", op_backend->usbintfnum);
++    }
++
++  g_vfs_job_set_backend_data (G_VFS_JOB (job), backend, NULL);
++
++  op_backend->session_proxy = dbus_g_proxy_new_for_name (op_backend->connection,
++                                                         "org.openobex",
++                                                         path,
++                                                         "org.openobex.Session");
++
++  g_vfs_backend_set_display_name (G_VFS_BACKEND  (op_backend),
++                                  op_backend->display_name);
++  g_vfs_backend_set_icon_name (G_VFS_BACKEND (op_backend), op_backend->icon_name);
++  g_vfs_backend_set_symbolic_icon_name (G_VFS_BACKEND (op_backend), op_backend->symbolic_icon_name);
++
++  obexftp_mount_spec = g_mount_spec_new ("obex");
++  g_mount_spec_set (obexftp_mount_spec, "host", device);
++  g_vfs_backend_set_mount_spec (G_VFS_BACKEND (op_backend), obexftp_mount_spec);
++  g_mount_spec_unref (obexftp_mount_spec);
++
++  dbus_g_proxy_add_signal(op_backend->session_proxy, "ErrorOccurred",
++                          G_TYPE_STRING, G_TYPE_STRING, G_TYPE_INVALID);
++  dbus_g_proxy_connect_signal(op_backend->session_proxy, "ErrorOccurred",
++                              G_CALLBACK(error_occurred_cb), op_backend, NULL);
++
++  dbus_g_proxy_add_signal(op_backend->session_proxy, "Cancelled",
++                          G_TYPE_INVALID);
++  dbus_g_proxy_connect_signal(op_backend->session_proxy, "Cancelled",
++                              G_CALLBACK(cancelled_cb), op_backend, NULL);
++
++  dbus_g_proxy_add_signal(op_backend->session_proxy, "Disconnected",
++                          G_TYPE_INVALID);
++  dbus_g_proxy_connect_signal(op_backend->session_proxy, "Disconnected",
++                              G_CALLBACK(disconnected_cb), op_backend, NULL);
++
++  dbus_g_proxy_add_signal(op_backend->session_proxy, "Closed",
++                          G_TYPE_INVALID);
++  dbus_g_proxy_connect_signal(op_backend->session_proxy, "Closed",
++                              G_CALLBACK(closed_cb), op_backend, NULL);
++
++  dbus_g_proxy_add_signal(op_backend->session_proxy, "TransferStarted",
++                          G_TYPE_STRING, G_TYPE_STRING, G_TYPE_UINT64, G_TYPE_INVALID);
++  dbus_g_proxy_add_signal(op_backend->session_proxy, "TransferCompleted",
++                          G_TYPE_INVALID);
++  dbus_g_proxy_add_signal(op_backend->session_proxy, "TransferProgress",
++                          G_TYPE_UINT64, G_TYPE_INVALID);
++
++  /* Now wait until the device is connected */
++  count = 0;
++  g_mutex_lock (&op_backend->mutex);
++
++  while (op_backend->status == ASYNC_PENDING && count < 100) {
++      gint64 end_time;
++      end_time = g_get_monotonic_time () + 100 * G_TIME_SPAN_MILLISECOND;
++      count++;
++      if (g_cond_wait_until (&op_backend->cond, &op_backend->mutex, end_time) != FALSE)
++            break;
++  }
++  g_mutex_unlock (&op_backend->mutex);
++
++  if (op_backend->status == ASYNC_ERROR || op_backend->status == ASYNC_PENDING)
++    {
++      g_message ("mount failed, didn't connect");
++
++      g_free (op_backend->display_name);
++      op_backend->display_name = NULL;
++      g_free (op_backend->bdaddr);
++      op_backend->bdaddr = NULL;
++      g_object_unref (op_backend->session_proxy);
++      op_backend->session_proxy = NULL;
++
++      if (op_backend->status != ASYNC_PENDING)
++            g_vfs_job_failed_from_error (G_VFS_JOB (job), op_backend->error);
++      else
++            g_vfs_job_failed (G_VFS_JOB (job),
++                              G_IO_ERROR, G_IO_ERROR_BUSY,
++                              _("Connection to the device lost"));
++      return;
++    }
++
++  op_backend->status = ASYNC_PENDING;
++
++  g_vfs_job_succeeded (G_VFS_JOB (job));
++
++  g_debug ("- do_mount\n");
++}
++
++static void
++transfer_started_cb (DBusGProxy *proxy, const gchar *filename,
++                     const gchar *local_path, guint64 byte_count, gpointer user_data)
++{
++  GVfsBackendObexftp *op_backend = G_VFS_BACKEND_OBEXFTP (user_data);
++
++  g_message ("transfer of %s to %s started", filename, local_path);
++
++  g_mutex_lock (&op_backend->mutex);
++  op_backend->status = ASYNC_SUCCESS;
++  g_cond_signal (&op_backend->cond);
++  g_mutex_unlock (&op_backend->mutex);
++}
++
++static void
++do_open_for_read (GVfsBackend *backend,
++                  GVfsJobOpenForRead *job,
++                  const char *filename)
++{
++  GVfsBackendObexftp *op_backend = G_VFS_BACKEND_OBEXFTP (backend);
++  GError *error = NULL;
++  ObexFTPOpenHandle *handle;
++  char *target, *basename;
++  GFileInfo *info;
++  goffset size;
++  int fd, success;
++
++  g_debug ("+ do_open_for_read, filename: %s\n", filename);
++
++  g_mutex_lock (&op_backend->mutex);
++  op_backend->doing_io = TRUE;
++
++  /* Change into the directory and cache the file size */
++  info = g_file_info_new ();
++  if (_query_file_info_helper (backend, filename, info, &error) == FALSE)
++    {
++      op_backend->doing_io = FALSE;
++      g_mutex_unlock (&op_backend->mutex);
++      g_vfs_job_failed_from_error (G_VFS_JOB (job), error);
++      g_error_free (error);
++      g_object_unref (info);
++      return;
++    }
++  /* If we're trying to open a directory for reading, exit out */
++  if (g_file_info_get_file_type (info) == G_FILE_TYPE_DIRECTORY)
++    {
++      op_backend->doing_io = FALSE;
++      g_mutex_unlock (&op_backend->mutex);
++      g_vfs_job_failed (G_VFS_JOB (job), G_IO_ERROR,
++                        G_IO_ERROR_IS_DIRECTORY,
++                        _("Can't open directory"));
++      g_object_unref (info);
++      return;
++    }
++
++  size = g_file_info_get_size (info);
++  g_object_unref (info);
++
++  if (g_vfs_job_is_cancelled (G_VFS_JOB (job)))
++    {
++      op_backend->doing_io = FALSE;
++      g_mutex_unlock (&op_backend->mutex);
++      g_vfs_job_failed (G_VFS_JOB (job), G_IO_ERROR,
++                        G_IO_ERROR_CANCELLED,
++                        _("Operation was cancelled"));
++      return;
++    }
++
++  fd = g_file_open_tmp ("gvfsobexftp-tmp-XXXXXX",
++                        &target, &error);
++  if (fd < 0)
++    {
++      op_backend->doing_io = FALSE;
++      g_mutex_unlock (&op_backend->mutex);
++      g_vfs_job_failed_from_error (G_VFS_JOB (job), error);
++      g_error_free (error);
++      return;
++    }
++
++  if (g_vfs_job_is_cancelled (G_VFS_JOB (job)))
++    {
++      op_backend->doing_io = FALSE;
++      g_mutex_unlock (&op_backend->mutex);
++      g_vfs_job_failed (G_VFS_JOB (job), G_IO_ERROR,
++                                   G_IO_ERROR_CANCELLED,
++                                   _("Operation was cancelled"));
++      return;
++    }
++
++  op_backend->status = ASYNC_PENDING;
++
++  dbus_g_proxy_connect_signal(op_backend->session_proxy, "TransferStarted",
++                              G_CALLBACK(transfer_started_cb), op_backend, NULL);
++
++  basename = g_path_get_basename (filename);
++  if (dbus_g_proxy_call (op_backend->session_proxy, "CopyRemoteFile", &error,
++                         G_TYPE_STRING, basename,
++                         G_TYPE_STRING, target,
++                         G_TYPE_INVALID,
++                         G_TYPE_INVALID) == FALSE)
++    {
++      g_message ("CopyRemoteFile failed");
++
++      g_free (basename);
++      g_vfs_job_failed_from_error (G_VFS_JOB (job), error);
++      g_error_free (error);
++
++      dbus_g_proxy_disconnect_signal(op_backend->session_proxy, "TransferStarted",
++                                     G_CALLBACK(transfer_started_cb), op_backend);
++
++      /* Close the target */
++      g_unlink (target);
++      g_free (target);
++      close (fd);
++
++      op_backend->doing_io = FALSE;
++      g_mutex_unlock (&op_backend->mutex);
++      return;
++    }
++
++  /* Wait for TransferStarted or ErrorOccurred to have happened */
++  while (op_backend->status == ASYNC_PENDING)
++        g_cond_wait (&op_backend->cond, &op_backend->mutex);
++  success = op_backend->status;
++  dbus_g_proxy_disconnect_signal(op_backend->session_proxy, "TransferStarted",
++                                 G_CALLBACK(transfer_started_cb), op_backend);
++
++  /* We either got success or an async error */
++  g_assert (success != ASYNC_PENDING);
++
++  g_message ("filename: %s (%s) copying to %s (retval %d)", filename, basename, target, success);
++  g_free (basename);
++
++  g_unlink (target);
++  g_free (target);
++  op_backend->status = ASYNC_PENDING;
++
++  if (success == ASYNC_ERROR)
++    {
++      op_backend->doing_io = FALSE;
++      g_mutex_unlock (&op_backend->mutex);
++      close (fd);
++      g_vfs_job_failed_from_error (G_VFS_JOB (job),
++                                   op_backend->error);
++      g_error_free (op_backend->error);
++      op_backend->error = NULL;
++      return;
++    }
++
++  handle = g_new0 (ObexFTPOpenHandle, 1);
++  handle->source = g_strdup (filename);
++  handle->fd = fd;
++  handle->size = size;
++  g_vfs_job_open_for_read_set_handle (job, handle);
++
++  g_debug ("- do_open_for_read, filename: %s\n", filename);
++
++  g_vfs_job_open_for_read_set_can_seek (G_VFS_JOB_OPEN_FOR_READ (job), FALSE);
++  g_vfs_job_succeeded (G_VFS_JOB (job));
++
++  op_backend->doing_io = FALSE;
++  g_mutex_unlock (&op_backend->mutex);
++}
++
++static int
++is_busy (DBusGProxy *session_proxy, GVfsJob *job)
++{
++  GError *error = NULL;
++  gboolean busy;
++
++  if (dbus_g_proxy_call (session_proxy, "IsBusy", &error,
++                         G_TYPE_INVALID,
++                         G_TYPE_BOOLEAN, &busy, G_TYPE_INVALID) == FALSE)
++    {
++      g_vfs_job_failed_from_error (job, error);
++      g_error_free (error);
++      return -1;
++    }
++
++  return busy;
++}
++
++static void
++do_read (GVfsBackend *backend,
++         GVfsJobRead *job,
++         GVfsBackendHandle handle,
++         char *buffer,
++         gsize bytes_requested)
++{
++  GVfsBackendObexftp *op_backend = G_VFS_BACKEND_OBEXFTP (backend);
++  ObexFTPOpenHandle *backend_handle = (ObexFTPOpenHandle *) handle;
++  ssize_t bytes_read = 0;
++  gboolean busy = TRUE;
++
++  while (bytes_read == 0 && busy != FALSE)
++    {
++      bytes_read = read (backend_handle->fd, buffer, bytes_requested);
++      if (bytes_read != 0)
++            break;
++
++      if (g_vfs_job_is_cancelled (G_VFS_JOB (job)))
++        {
++          g_vfs_job_failed (G_VFS_JOB (job), G_IO_ERROR,
++                            G_IO_ERROR_CANCELLED,
++                            _("Operation was cancelled"));
++          return;
++        }
++
++      busy = is_busy (op_backend->session_proxy, G_VFS_JOB (job));
++      if (busy < 0)
++            return;
++
++      g_usleep (G_USEC_PER_SEC / 100);
++    }
++
++  if (bytes_read < 0)
++    {
++      g_vfs_job_failed_from_errno (G_VFS_JOB (job), errno);
++    }
++  else if (bytes_read == 0)
++    {
++      g_vfs_job_read_set_size (job, 0);
++      g_vfs_job_succeeded (G_VFS_JOB (job));
++    }
++  else
++    {
++      g_vfs_job_read_set_size (job, bytes_read);
++      g_vfs_job_succeeded (G_VFS_JOB (job));
++    }
++}
++
++static void
++do_close_read (GVfsBackend *backend,
++               GVfsJobCloseRead *job,
++               GVfsBackendHandle handle)
++{
++  GVfsBackendObexftp *op_backend = G_VFS_BACKEND_OBEXFTP (backend);
++  ObexFTPOpenHandle *backend_handle = (ObexFTPOpenHandle *) handle;
++  int busy;
++
++  g_debug ("+ do_close_read\n");
++
++  busy = is_busy (op_backend->session_proxy, G_VFS_JOB (job));
++  if (busy < 0) {
++      g_message ("busy error");
++        return;
++  }
++
++  g_mutex_lock (&op_backend->mutex);
++
++  if (busy > 0)
++    {
++      op_backend->status = ASYNC_PENDING;
++
++      if (dbus_g_proxy_call (op_backend->session_proxy, "Cancel", NULL,
++                         G_TYPE_INVALID, G_TYPE_INVALID) != FALSE)
++        {
++          while (op_backend->status == ASYNC_PENDING)
++                g_cond_wait (&op_backend->cond, &op_backend->mutex);
++        }
++    }
++
++  g_mutex_unlock (&op_backend->mutex);
++
++  close (backend_handle->fd);
++  g_free (backend_handle->source);
++  g_free (backend_handle);
++
++  g_vfs_job_succeeded (G_VFS_JOB (job));
++
++  g_debug ("- do_close_read\n");
++}
++
++static void
++do_query_info (GVfsBackend *backend,
++               GVfsJobQueryInfo *job,
++               const char *filename,
++               GFileQueryInfoFlags flags,
++               GFileInfo *info,
++               GFileAttributeMatcher *matcher)
++{
++  GVfsBackendObexftp *op_backend = G_VFS_BACKEND_OBEXFTP (backend);
++  GError *error = NULL;
++
++  g_debug ("+ do_query_info, filename: %s\n", filename);
++
++  g_mutex_lock (&op_backend->mutex);
++
++  if (_query_file_info_helper (backend, filename, info, &error) == FALSE)
++    {
++      g_mutex_unlock (&op_backend->mutex);
++      g_vfs_job_failed_from_error (G_VFS_JOB (job), error);
++      g_error_free (error);
++      return;
++    }
++
++  g_mutex_unlock (&op_backend->mutex);
++
++  g_vfs_job_succeeded (G_VFS_JOB (job));
++
++  g_debug ("- do_query_info\n");
++
++  return;
++}
++
++static void
++do_query_fs_info (GVfsBackend *backend,
++                  GVfsJobQueryFsInfo *job,
++                  const char *filename,
++                  GFileInfo *info,
++                  GFileAttributeMatcher *attribute_matcher)
++{
++  GVfsBackendObexftp *op_backend = G_VFS_BACKEND_OBEXFTP (backend);
++  OvuCaps *caps;
++  OvuCapsMemory *memory;
++  GError *error = NULL;
++  char *caps_str;
++  const char *mem_type;
++  GList *l;
++  gboolean has_free_memory;
++
++  g_debug ("+ do_query_fs_info, filename: %s\n", filename);
++
++  g_mutex_lock (&op_backend->mutex);
++
++  /* Get the capabilities */
++  if (dbus_g_proxy_call (op_backend->session_proxy, "GetCapability", &error,
++                         G_TYPE_INVALID,
++                         G_TYPE_STRING, &caps_str, G_TYPE_INVALID) == FALSE)
++    {
++      g_mutex_unlock (&op_backend->mutex);
++      g_vfs_job_failed_from_error (G_VFS_JOB (job), error);
++      g_error_free (error);
++      return;
++    }
++
++  if (g_vfs_job_is_cancelled (G_VFS_JOB (job)))
++    {
++      g_mutex_unlock (&op_backend->mutex);
++      g_vfs_job_failed (G_VFS_JOB (job), G_IO_ERROR,
++                        G_IO_ERROR_CANCELLED,
++                        _("Operation was cancelled"));
++      g_free (caps_str);
++      return;
++    }
++
++  /* No caps from the server? */
++  if (caps_str == NULL)
++    {
++      /* Best effort, don't error out */
++      g_mutex_unlock (&op_backend->mutex);
++      g_vfs_job_succeeded (G_VFS_JOB (job));
++      return;
++    }
++
++  caps = ovu_caps_parser_parse (caps_str, strlen (caps_str), &error);
++  g_free (caps_str);
++  if (caps == NULL)
++    {
++      g_mutex_unlock (&op_backend->mutex);
++      g_vfs_job_failed_from_error (G_VFS_JOB (job), error);
++      g_error_free (error);
++      return;
++    }
++
++  /* Check whether we have no free space available */
++  has_free_memory = FALSE;
++  for (l = ovu_caps_get_memory_entries (caps); l != NULL; l = l->next)
++    {
++      if (ovu_caps_memory_has_free (l->data) != FALSE)
++        {
++          has_free_memory = TRUE;
++          break;
++        }
++    }
++  if (has_free_memory == FALSE)
++    {
++      g_mutex_unlock (&op_backend->mutex);
++      /* Best effort, don't error out */
++      g_vfs_job_succeeded (G_VFS_JOB (job));
++      return;
++    }
++
++  /* Check whether we have only one memory type */
++  l = ovu_caps_get_memory_entries (caps);
++  if (g_list_length (l) == 1)
++    {
++      memory = l->data;
++      goto set_info_from_memory;
++    }
++
++  if (_query_file_info_helper (backend, filename, info, &error) == FALSE)
++    {
++      g_mutex_unlock (&op_backend->mutex);
++      g_vfs_job_failed_from_error (G_VFS_JOB (job), error);
++      g_error_free (error);
++      ovu_caps_free (caps);
++      return;
++    }
++
++  if (g_vfs_job_is_cancelled (G_VFS_JOB (job)))
++    {
++      g_mutex_unlock (&op_backend->mutex);
++      g_vfs_job_failed (G_VFS_JOB (job), G_IO_ERROR,
++                        G_IO_ERROR_CANCELLED,
++                        _("Operation was cancelled"));
++      ovu_caps_free (caps);
++      return;
++    }
++
++  mem_type = NULL;
++  if (g_file_info_has_attribute (info, G_FILE_ATTRIBUTE_UNIX_RDEV) != FALSE)
++    {
++      guint rdev;
++      rdev = g_file_info_get_attribute_uint32 (info, G_FILE_ATTRIBUTE_UNIX_RDEV);
++      mem_type = om_mem_type_id_to_string (rdev);
++    }
++  memory = ovu_caps_get_memory_type (caps, mem_type);
++
++set_info_from_memory:
++  if (memory != NULL && ovu_caps_memory_has_free (memory) != FALSE)
++    {
++      g_file_info_set_attribute_uint64 (info,
++                                        G_FILE_ATTRIBUTE_FILESYSTEM_FREE,
++                                        ovu_caps_memory_get_free (memory));
++      if (ovu_caps_memory_has_used (memory) != FALSE)
++        {
++          g_file_info_set_attribute_uint64 (info,
++                                            G_FILE_ATTRIBUTE_FILESYSTEM_SIZE,
++                                            ovu_caps_memory_get_free (memory)
++                                            + ovu_caps_memory_get_used (memory));
++        }
++    }
++  ovu_caps_free (caps);
++
++  g_file_info_set_attribute_string (info, G_FILE_ATTRIBUTE_FILESYSTEM_TYPE, "obexftp");
++
++  g_vfs_job_succeeded (G_VFS_JOB (job));
++
++  g_mutex_unlock (&op_backend->mutex);
++
++  g_debug ("- do_query_fs_info\n");
++}
++
++static void
++do_enumerate (GVfsBackend *backend,
++              GVfsJobEnumerate *job,
++              const char *filename,
++              GFileAttributeMatcher *matcher,
++              GFileQueryInfoFlags flags)
++{
++  GVfsBackendObexftp *op_backend = G_VFS_BACKEND_OBEXFTP (backend);
++  GError *error = NULL;
++  char *files;
++  GList *elements = NULL;
++
++  g_debug ("+ do_enumerate, filename: %s\n", filename);
++
++  g_mutex_lock (&op_backend->mutex);
++
++  if (_change_directory (op_backend, filename, &error) == FALSE)
++    {
++      g_mutex_unlock (&op_backend->mutex);
++      g_vfs_job_failed_from_error (G_VFS_JOB (job), error);
++      g_error_free (error);
++      return;
++    }
++
++  files = NULL;
++  if (_retrieve_folder_listing (backend, filename, &files, &error) == FALSE)
++    {
++      g_mutex_unlock (&op_backend->mutex);
++      g_vfs_job_failed_from_error (G_VFS_JOB (job), error);
++      g_error_free (error);
++      return;
++    }
++
++  if (gvfsbackendobexftp_fl_parser_parse (files, strlen (files), &elements, &error) == FALSE)
++    {
++      g_mutex_unlock (&op_backend->mutex);
++      /* See http://web.archive.org/web/20070826221251/http://docs.kde.org/development/en/extragear-pim/kdebluetooth/components.kio_obex.html#devices
++       * for the reasoning */
++      if (strstr (files, "SYSTEM\"obex-folder-listing.dtd") != NULL && _is_nokia_3650 (op_backend->bdaddr))
++        {
++          g_vfs_job_failed (G_VFS_JOB (job), G_IO_ERROR,
++                            G_IO_ERROR_NOT_SUPPORTED,
++                            _("Device requires a software update"));
++        }
++      else
++        {
++          g_vfs_job_failed_from_error (G_VFS_JOB (job), error);
++        }
++      g_message ("gvfsbackendobexftp_fl_parser_parse failed");
++      g_free (files);
++      g_error_free (error);
++      return;
++    }
++  g_free (files);
++
++  g_vfs_job_succeeded (G_VFS_JOB (job));
++
++  g_vfs_job_enumerate_add_infos (job, elements);
++
++  g_list_free_full (elements, g_object_unref);
++  g_vfs_job_enumerate_done (job);
++
++  g_mutex_unlock (&op_backend->mutex);
++
++  g_debug ("- do_enumerate\n");
++}
++
++typedef struct {
++  GVfsBackendObexftp *op_backend;
++  GFileProgressCallback progress_callback;
++  gpointer progress_callback_data;
++  goffset total_bytes;
++} PushData;
++
++static void
++push_transfer_started_cb (DBusGProxy *proxy,
++                          const gchar *filename,
++                          const gchar *local_path,
++                          guint64 total_bytes,
++                          gpointer user_data)
++{
++  PushData *job_data = (PushData *) user_data;
++  GVfsBackendObexftp *op_backend = job_data->op_backend;
++
++  g_message ("transfer of %s to %s started", filename, local_path);
++
++  g_mutex_lock (&op_backend->mutex);
++
++  op_backend->status = ASYNC_RUNNING;
++  job_data->total_bytes = (goffset) total_bytes;
++  if (job_data->progress_callback)
++    job_data->progress_callback (0, job_data->total_bytes,
++                                 job_data->progress_callback_data);
++
++  g_cond_signal (&op_backend->cond);
++  g_mutex_unlock (&op_backend->mutex);
++}
++
++static void
++push_transfer_completed_cb (DBusGProxy *proxy,
++                            gpointer user_data)
++{
++  PushData *job_data = (PushData *) user_data;
++  GVfsBackendObexftp *op_backend = job_data->op_backend;
++
++  g_message ("transfer completed");
++
++  g_mutex_lock (&op_backend->mutex);
++
++  op_backend->status = ASYNC_SUCCESS;
++
++  g_cond_signal (&op_backend->cond);
++  g_mutex_unlock (&op_backend->mutex);
++}
++
++static void
++push_transfer_progress_cb (DBusGProxy *proxy,
++                           guint64 bytes_transferred,
++                           gpointer user_data)
++{
++  PushData *job_data = (PushData *) user_data;
++
++  g_message ("transfer progress");
++
++  if (job_data->progress_callback)
++    job_data->progress_callback ((goffset) bytes_transferred,
++                                 job_data->total_bytes,
++                                 job_data->progress_callback_data);
++}
++
++static void
++push_data_free (PushData *job_data)
++{
++  g_object_unref (job_data->op_backend);
++  g_slice_free (PushData, job_data);
++}
++
++static gboolean
++_push_single_file_helper (GVfsBackendObexftp *op_backend,
++                          GVfsJobPush *job,
++                          const char *local_path,
++                          const char *destination,
++                          GError **error,
++                          PushData *job_data)
++{
++  char *dirname;
++  int success;
++
++  dirname = g_path_get_dirname (destination);
++
++  if (_change_directory (op_backend, dirname, error) == FALSE)
++    {
++      g_free (dirname);
++      return FALSE;
++    }
++
++  g_free (dirname);
++
++  if (g_vfs_job_is_cancelled (G_VFS_JOB (job)))
++    {
++      g_set_error_literal (error, G_IO_ERROR,
++                           G_IO_ERROR_CANCELLED,
++                           _("Operation was cancelled"));
++      return FALSE;
++    }
++
++  op_backend->status = ASYNC_PENDING;
++
++  /* connect to the transfer signals */
++  dbus_g_proxy_connect_signal (op_backend->session_proxy, "TransferStarted",
++                               G_CALLBACK (push_transfer_started_cb), job_data,
++                               NULL);
++  dbus_g_proxy_connect_signal (op_backend->session_proxy, "TransferCompleted",
++                               G_CALLBACK (push_transfer_completed_cb), job_data,
++                               NULL);
++  dbus_g_proxy_connect_signal (op_backend->session_proxy, "TransferProgress",
++                               G_CALLBACK (push_transfer_progress_cb), job_data,
++                               NULL);
++
++  if (dbus_g_proxy_call (op_backend->session_proxy, "SendFile", error,
++                         G_TYPE_STRING, local_path, G_TYPE_INVALID,
++                         G_TYPE_INVALID) == FALSE)
++    {
++      dbus_g_proxy_disconnect_signal (op_backend->session_proxy, "TransferStarted", 
++                                      G_CALLBACK (push_transfer_started_cb), job_data);
++      dbus_g_proxy_disconnect_signal (op_backend->session_proxy, "TransferCompleted", 
++                                      G_CALLBACK (push_transfer_completed_cb), job_data);
++      dbus_g_proxy_disconnect_signal (op_backend->session_proxy, "TransferProgress", 
++                                      G_CALLBACK (push_transfer_progress_cb), job_data);
++      return FALSE;
++    }
++
++  /* wait for the TransferStarted or ErrorOccurred signal */
++  while (op_backend->status == ASYNC_PENDING)
++    g_cond_wait (&op_backend->cond, &op_backend->mutex);
++
++  dbus_g_proxy_disconnect_signal (op_backend->session_proxy, "TransferStarted",
++                                  G_CALLBACK (push_transfer_started_cb), job_data);
++  success = op_backend->status;
++
++  /* we either got the operation running or an error */
++  if (success == ASYNC_ERROR)
++    {
++      dbus_g_proxy_disconnect_signal (op_backend->session_proxy, "TransferCompleted", 
++                                      G_CALLBACK (push_transfer_completed_cb), job_data);
++      dbus_g_proxy_disconnect_signal (op_backend->session_proxy, "TransferProgress", 
++                                      G_CALLBACK (push_transfer_progress_cb), job_data);
++
++      *error = g_error_copy (op_backend->error);
++      g_error_free (op_backend->error);
++      op_backend->error = NULL;
++      return FALSE;
++    }
++
++  while (op_backend->status == ASYNC_RUNNING)
++    g_cond_wait (&op_backend->cond, &op_backend->mutex);
++
++  dbus_g_proxy_disconnect_signal (op_backend->session_proxy, "TransferCompleted", 
++                                  G_CALLBACK (push_transfer_completed_cb), job_data);
++  dbus_g_proxy_disconnect_signal (op_backend->session_proxy, "TransferProgress", 
++                                  G_CALLBACK (push_transfer_progress_cb), job_data);
++  success = op_backend->status;
++
++  /* same as before, either we have success or an error */
++  if (success == ASYNC_ERROR)
++    {
++      *error = g_error_copy (op_backend->error);
++      g_error_free (op_backend->error);
++      op_backend->error = NULL;
++      return FALSE;
++    }
++
++  return TRUE;
++}
++
++static void
++do_push (GVfsBackend *backend,
++         GVfsJobPush *job,
++         const char *destination,
++         const char *local_path,
++         GFileCopyFlags flags,
++         gboolean remove_source,
++         GFileProgressCallback progress_callback,
++         gpointer progress_callback_data)
++{
++  GVfsBackendObexftp *op_backend = G_VFS_BACKEND_OBEXFTP (backend);
++  GError *error = NULL;
++  gboolean is_dir, overwrite, res;
++  GFileType target_type;
++  PushData *job_data;
++  GFileInfo *info;
++
++  g_debug ("+ do_push, destination: %s, local_path: %s\n", destination, local_path);
++
++  g_mutex_lock (&op_backend->mutex);
++  op_backend->doing_io = TRUE;
++
++  overwrite = (flags & G_FILE_COPY_OVERWRITE);
++  is_dir = g_file_test (local_path, G_FILE_TEST_IS_DIR);
++  info = g_file_info_new ();
++  target_type = 0;
++
++  if (g_vfs_job_is_cancelled (G_VFS_JOB (job)))
++    {
++      op_backend->doing_io = FALSE;
++      g_mutex_unlock (&op_backend->mutex);
++
++      g_vfs_job_failed (G_VFS_JOB (job), G_IO_ERROR,
++                        G_IO_ERROR_CANCELLED,
++                        _("Operation was cancelled"));
++      return;
++    }
++
++  res = _query_file_info_helper (backend, destination, info, &error);
++
++  if (error != NULL)
++    {
++      if (!g_error_matches (error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND))
++        {
++          op_backend->doing_io = FALSE;
++          g_mutex_unlock (&op_backend->mutex);
++
++          g_vfs_job_failed_from_error (G_VFS_JOB (job), error);
++          g_error_free (error);
++
++          return;
++        }
++      else
++        {
++          g_clear_error (&error);
++          res = TRUE;
++        }
++    }
++
++  if (res)
++    target_type = g_file_info_get_file_type (info);
++
++  g_object_unref (info);
++
++  /* error handling */
++  if (is_dir)
++    {
++      op_backend->doing_io = FALSE;
++      g_mutex_unlock (&op_backend->mutex);
++
++      if (target_type != 0)
++        {
++          if (overwrite)
++            {
++              if (target_type == G_FILE_TYPE_DIRECTORY)
++                {
++                  g_vfs_job_failed (G_VFS_JOB (job), G_IO_ERROR,
++                                    G_IO_ERROR_WOULD_MERGE,
++                                   _("Can't copy directory over directory"));
++                  return;
++                }
++            }
++          else
++            {
++              g_vfs_job_failed (G_VFS_JOB (job), G_IO_ERROR,
++                                G_IO_ERROR_EXISTS,
++                                _("Target file exists"));
++              return;
++            }
++        }
++
++      g_vfs_job_failed (G_VFS_JOB (job), G_IO_ERROR,
++                        G_IO_ERROR_WOULD_RECURSE,
++                        _("Can't recursively copy directory"));
++      return;
++    }
++  else
++    {
++      if (target_type != 0)
++        {
++          op_backend->doing_io = FALSE;
++          g_mutex_unlock (&op_backend->mutex);
++
++          if (overwrite)
++            {
++              if (target_type == G_FILE_TYPE_DIRECTORY)
++                {
++                  g_vfs_job_failed (G_VFS_JOB (job), G_IO_ERROR,
++                                    G_IO_ERROR_IS_DIRECTORY,
++                                    _("Can't copy file over directory"));
++                  return;
++                }
++            }
++          else
++            {
++              g_vfs_job_failed (G_VFS_JOB (job), G_IO_ERROR,
++                                G_IO_ERROR_EXISTS,
++                                _("Target file exists"));
++              return;
++            }
++        }
++    }
++
++  job_data = g_slice_new0 (PushData);
++  job_data->op_backend = g_object_ref (op_backend);
++  job_data->progress_callback = progress_callback;
++  job_data->progress_callback_data = progress_callback_data;
++
++  /* start the actual transfer operation */
++  if (_push_single_file_helper (op_backend, job, local_path, destination,
++                                &error, job_data) == FALSE)
++    {
++      op_backend->doing_io = FALSE;
++      g_mutex_unlock (&op_backend->mutex);
++      push_data_free (job_data);
++
++      g_vfs_job_failed_from_error (G_VFS_JOB (job), error);
++      return;
++    }
++
++  push_data_free (job_data);
++
++  /* we called _query_file_info_helper (), so we need to invalidate the
++   * cache, as a query_info () will be called on us after we return.
++   */
++  _invalidate_cache_helper (op_backend);
++
++  if (remove_source && g_unlink (local_path) == -1)
++    {
++      int errsv = errno;
++
++      g_vfs_job_failed (G_VFS_JOB (job),
++                        G_IO_ERROR,
++                        g_io_error_from_errno (errsv),
++                        _("Error deleting file: %s"),
++                        g_strerror (errsv));
++    }
++  else
++    g_vfs_job_succeeded (G_VFS_JOB (job));
++
++  op_backend->doing_io = FALSE;
++  g_mutex_unlock (&op_backend->mutex);
++
++  g_debug ("- do_push\n");
++}
++
++static void
++do_delete (GVfsBackend *backend,
++           GVfsJobDelete *job,
++           const char *filename)
++{
++  GVfsBackendObexftp *op_backend = G_VFS_BACKEND_OBEXFTP (backend);
++  char *basename, *parent;
++  GError *error = NULL;
++  GFileInfo *info;
++
++  g_debug ("+ do_delete, filename: %s\n", filename);
++
++  g_mutex_lock (&op_backend->mutex);
++
++  /* Check whether we have a directory */
++  info = g_file_info_new ();
++  if (_query_file_info_helper (backend, filename, info, &error) == FALSE)
++    {
++      g_mutex_unlock (&op_backend->mutex);
++      g_vfs_job_failed_from_error (G_VFS_JOB (job), error);
++      g_error_free (error);
++      g_object_unref (info);
++      return;
++    }
++
++  if (g_vfs_job_is_cancelled (G_VFS_JOB (job)))
++    {
++      g_mutex_unlock (&op_backend->mutex);
++      g_vfs_job_failed (G_VFS_JOB (job), G_IO_ERROR,
++                        G_IO_ERROR_CANCELLED,
++                        _("Operation was cancelled"));
++      g_object_unref (info);
++      return;
++    }
++
++  /* Get the listing of the directory, and abort if it's not empty */
++  if (g_file_info_get_file_type (info) == G_FILE_TYPE_DIRECTORY)
++    {
++      GList *elements;
++      char *files;
++      guint len;
++
++      g_object_unref (info);
++
++      if (_change_directory (op_backend, filename, &error) == FALSE)
++        {
++          g_mutex_unlock (&op_backend->mutex);
++          g_vfs_job_failed_from_error (G_VFS_JOB (job), error);
++          g_error_free (error);
++          return;
++        }
++
++      if (g_vfs_job_is_cancelled (G_VFS_JOB (job)))
++        {
++          g_mutex_unlock (&op_backend->mutex);
++          g_vfs_job_failed (G_VFS_JOB (job), G_IO_ERROR,
++                            G_IO_ERROR_CANCELLED,
++                            _("Operation was cancelled"));
++          return;
++        }
++
++      files = NULL;
++      if (_retrieve_folder_listing (backend, filename, &files, &error) == FALSE)
++        {
++          g_mutex_unlock (&op_backend->mutex);
++          g_vfs_job_failed_from_error (G_VFS_JOB (job), error);
++          g_error_free (error);
++          return;
++        }
++
++      if (gvfsbackendobexftp_fl_parser_parse (files, strlen (files), &elements, &error) == FALSE)
++        {
++          g_mutex_unlock (&op_backend->mutex);
++          g_message ("gvfsbackendobexftp_fl_parser_parse failed");
++          g_free (files);
++          g_vfs_job_failed_from_error (G_VFS_JOB (job), error);
++          g_error_free (error);
++          return;
++        }
++      g_free (files);
++
++      len = g_list_length (elements);
++      g_list_free_full (elements, g_object_unref);
++
++      if (len != 0)
++        {
++          g_mutex_unlock (&op_backend->mutex);
++          g_set_error_literal (&error, G_IO_ERROR,
++	                       G_IO_ERROR_NOT_EMPTY,
++        	               g_strerror (ENOTEMPTY));
++          g_vfs_job_failed_from_error (G_VFS_JOB (job), error);
++          g_error_free (error);
++          return;
++        }
++    }
++  else
++    {
++      g_object_unref (info);
++    }
++
++  basename = g_path_get_basename (filename);
++  if (strcmp (basename, G_DIR_SEPARATOR_S) == 0
++      || strcmp (basename, ".") == 0)
++    {
++      g_mutex_unlock (&op_backend->mutex);
++      g_free (basename);
++      g_vfs_job_failed_from_errno (G_VFS_JOB (job), EPERM);
++      return;
++    }
++
++  if (g_vfs_job_is_cancelled (G_VFS_JOB (job)))
++    {
++      g_mutex_unlock (&op_backend->mutex);
++      g_vfs_job_failed (G_VFS_JOB (job), G_IO_ERROR,
++                        G_IO_ERROR_CANCELLED,
++                        _("Operation was cancelled"));
++      g_free (basename);
++      return;
++    }
++
++  parent = g_path_get_dirname (filename);
++  if (_change_directory (op_backend, parent, &error) == FALSE)
++    {
++      g_mutex_unlock (&op_backend->mutex);
++      g_vfs_job_failed_from_error (G_VFS_JOB (job), error);
++      g_free (basename);
++      g_free (parent);
++      g_error_free (error);
++      return;
++    }
++  g_free (parent);
++
++  if (g_vfs_job_is_cancelled (G_VFS_JOB (job)))
++    {
++      g_mutex_unlock (&op_backend->mutex);
++      g_vfs_job_failed (G_VFS_JOB (job), G_IO_ERROR,
++                        G_IO_ERROR_CANCELLED,
++                        _("Operation was cancelled"));
++      g_free (basename);
++      return;
++    }
++
++  if (dbus_g_proxy_call (op_backend->session_proxy, "DeleteRemoteFile", &error,
++                         G_TYPE_STRING, basename, G_TYPE_INVALID,
++                         G_TYPE_INVALID) == FALSE)
++    {
++      g_mutex_unlock (&op_backend->mutex);
++      g_vfs_job_failed_from_error (G_VFS_JOB (job), error);
++      g_error_free (error);
++      return;
++    }
++  g_free (basename);
++
++  g_vfs_job_succeeded (G_VFS_JOB (job));
++
++  g_mutex_unlock (&op_backend->mutex);
++
++  g_debug ("- do_delete\n");
++}
++
++static void
++do_make_directory (GVfsBackend *backend,
++                   GVfsJobMakeDirectory *job,
++                   const char *filename)
++{
++  GVfsBackendObexftp *op_backend = G_VFS_BACKEND_OBEXFTP (backend);
++  char *basename, *parent;
++  GError *error = NULL;
++  GFileInfo *info;
++
++  g_debug ("+ do_make_directory, filename: %s\n", filename);
++
++  g_mutex_lock (&op_backend->mutex);
++
++  /* Check if the folder already exists */
++  info = g_file_info_new ();
++  if (_query_file_info_helper (backend, filename, info, &error) != FALSE)
++    {
++      g_mutex_unlock (&op_backend->mutex);
++      g_object_unref (info);
++      g_vfs_job_failed_from_errno (G_VFS_JOB (job), EEXIST);
++      return;
++    }
++  g_object_unref (info);
++  if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND) == FALSE)
++    {
++      g_mutex_unlock (&op_backend->mutex);
++      g_vfs_job_failed_from_error (G_VFS_JOB (job), error);
++      g_error_free (error);
++      return;
++    }
++
++  if (error)
++    g_clear_error (&error);
++
++  if (g_vfs_job_is_cancelled (G_VFS_JOB (job)))
++    {
++      g_mutex_unlock (&op_backend->mutex);
++      g_vfs_job_failed (G_VFS_JOB (job), G_IO_ERROR,
++                        G_IO_ERROR_CANCELLED,
++                        _("Operation was cancelled"));
++      return;
++    }
++
++  parent = g_path_get_dirname (filename);
++  if (_change_directory (op_backend, parent, &error) == FALSE)
++    {
++      g_mutex_unlock (&op_backend->mutex);
++      g_vfs_job_failed_from_error (G_VFS_JOB (job), error);
++      g_error_free (error);
++      return;
++    }
++  g_free (parent);
++
++  if (g_vfs_job_is_cancelled (G_VFS_JOB (job)))
++    {
++      g_mutex_unlock (&op_backend->mutex);
++      g_vfs_job_failed (G_VFS_JOB (job), G_IO_ERROR,
++                        G_IO_ERROR_CANCELLED,
++                        _("Operation was cancelled"));
++      return;
++    }
++
++  basename = g_path_get_basename (filename);
++  if (dbus_g_proxy_call (op_backend->session_proxy, "CreateFolder", &error,
++                         G_TYPE_STRING, basename, G_TYPE_INVALID,
++                         G_TYPE_INVALID) == FALSE)
++    {
++      g_mutex_unlock (&op_backend->mutex);
++      g_free (basename);
++      g_vfs_job_failed_from_error (G_VFS_JOB (job), error);
++      g_error_free (error);
++      return;
++    }
++  g_free (basename);
++
++  /* reset the current directory so that we won't cache when querying
++   * info after this has succeeded.
++   */
++  _invalidate_cache_helper (op_backend);
++
++  g_vfs_job_succeeded (G_VFS_JOB (job));
++
++  g_mutex_unlock (&op_backend->mutex);
++
++  g_debug ("- do_make_directory\n");
++}
++
++static void
++g_vfs_backend_obexftp_class_init (GVfsBackendObexftpClass *klass)
++{
++  GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
++  GVfsBackendClass *backend_class = G_VFS_BACKEND_CLASS (klass);
++
++  dbus_threads_init_default ();
++
++  gobject_class->finalize = g_vfs_backend_obexftp_finalize;
++
++  backend_class->mount = do_mount;
++  backend_class->open_for_read = do_open_for_read;
++  backend_class->read = do_read;
++  backend_class->close_read = do_close_read;
++  backend_class->query_info = do_query_info;
++  backend_class->query_fs_info = do_query_fs_info;
++  backend_class->enumerate = do_enumerate;
++  backend_class->delete = do_delete;
++  backend_class->make_directory = do_make_directory;
++  backend_class->push = do_push;
++
++  /* ErrorOccurred */
++  dbus_g_object_register_marshaller (obexftp_marshal_VOID__STRING_STRING,
++                                     G_TYPE_NONE, G_TYPE_STRING,
++                                     G_TYPE_STRING, G_TYPE_INVALID);
++  /* TransferStarted */
++  dbus_g_object_register_marshaller(obexftp_marshal_VOID__STRING_STRING_UINT64,
++                                    G_TYPE_NONE, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_UINT64, G_TYPE_INVALID);
++  /* TransferProgress */
++  dbus_g_object_register_marshaller(obexftp_marshal_VOID__UINT64,
++                                    G_TYPE_NONE, G_TYPE_UINT64, G_TYPE_INVALID);
++  /* SessionConnected */
++  dbus_g_object_register_marshaller(obexftp_marshal_VOID__STRING,
++                                    G_TYPE_NONE, DBUS_TYPE_G_OBJECT_PATH, G_TYPE_INVALID);
++  /* SessionConnectError */
++  dbus_g_object_register_marshaller (obexftp_marshal_VOID__STRING_STRING_STRING,
++                                     G_TYPE_NONE, DBUS_TYPE_G_OBJECT_PATH, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_INVALID);
++}
++
++/*
++ * vim: sw=2 ts=8 cindent expandtab cinoptions=f0,>4,n2,{2,(0,^-2,t0 ai
++ */
+Index: b/daemon/gvfsbackendobexftp.h
+===================================================================
+--- /dev/null
++++ b/daemon/gvfsbackendobexftp.h
+@@ -0,0 +1,50 @@
++/* GIO - GLib Input, Output and Streaming Library
++ * 
++ * Copyright (C) 2006-2007 Red Hat, Inc.
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General
++ * Public License along with this library; if not, write to the
++ * Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
++ * Boston, MA 02110-1301, USA.
++ *
++ * Author: Alexander Larsson <alexl@redhat.com>
++ */
++
++#ifndef __G_VFS_BACKEND_OBEXFTP_H__
++#define __G_VFS_BACKEND_OBEXFTP_H__
++
++#include <gvfsbackend.h>
++#include <gmountspec.h>
++
++G_BEGIN_DECLS
++
++#define G_VFS_TYPE_BACKEND_OBEXFTP         (g_vfs_backend_obexftp_get_type ())
++#define G_VFS_BACKEND_OBEXFTP(o)           (G_TYPE_CHECK_INSTANCE_CAST ((o), G_VFS_TYPE_BACKEND_OBEXFTP, GVfsBackendObexftp))
++#define G_VFS_BACKEND_OBEXFTP_CLASS(k)     (G_TYPE_CHECK_CLASS_CAST((k), G_VFS_TYPE_BACKEND_OBEXFTP, GVfsBackendObexftpClass))
++#define G_VFS_IS_BACKEND_OBEXFTP(o)        (G_TYPE_CHECK_INSTANCE_TYPE ((o), G_VFS_TYPE_BACKEND_OBEXFTP))
++#define G_VFS_IS_BACKEND_OBEXFTP_CLASS(k)  (G_TYPE_CHECK_CLASS_TYPE ((k), G_VFS_TYPE_BACKEND_OBEXFTP))
++#define G_VFS_BACKEND_OBEXFTP_GET_CLASS(o) (G_TYPE_INSTANCE_GET_CLASS ((o), G_VFS_TYPE_BACKEND_OBEXFTP, GVfsBackendObexftpClass))
++
++typedef struct _GVfsBackendObexftp        GVfsBackendObexftp;
++typedef struct _GVfsBackendObexftpClass   GVfsBackendObexftpClass;
++
++struct _GVfsBackendObexftpClass
++{
++  GVfsBackendClass parent_class;
++};
++
++GType g_vfs_backend_obexftp_get_type (void) G_GNUC_CONST;
++
++G_END_DECLS
++
++#endif /* __G_VFS_BACKEND_OBEXFTP_H__ */
+Index: b/daemon/obexftp-marshal.list
+===================================================================
+--- /dev/null
++++ b/daemon/obexftp-marshal.list
+@@ -0,0 +1,5 @@
++VOID:STRING
++VOID:UINT64
++VOID:STRING,STRING
++VOID:STRING,STRING,STRING
++VOID:STRING,STRING,UINT64
+Index: b/daemon/obexftp.mount.in
+===================================================================
+--- /dev/null
++++ b/daemon/obexftp.mount.in
+@@ -0,0 +1,4 @@
++[Mount]
++Type=obex
++Exec=@libexecdir@/gvfsd-obexftp
++AutoMount=false
+Index: b/man/gvfs.xml
+===================================================================
+--- a/man/gvfs.xml
++++ b/man/gvfs.xml
+@@ -37,7 +37,7 @@
+                 includes a 'local' implementation using POSIX. gvfs
+                 provides implementations that go beyond that and allow
+                 to access files and storage using many protocols, such
+-                as ftp, http, sftp, dav, nfs, etc. It also provides
++                as ftp, http, sftp, dav, nfs, obexftp, etc. It also provides
+                 support for trash folders, for cd burning and for monitoring
+                 interesting devices and volumes on the computer.</para>
+ 
+@@ -80,6 +80,7 @@
+                         <listitem><para>gvfsd-mtp - mounts over MTP</para></listitem>
+                         <listitem><para>gvfsd-network - provides network://</para></listitem>
+                         <listitem><para>gvfsd-nfs - mounts over NFS</para></listitem>
++                        <listitem><para>gvfsd-obexftp - mounts over obexftp</para></listitem>
+                         <listitem><para>gvfsd-recent - provides recent://</para></listitem>
+                         <listitem><para>gvfsd-sftp - mounts over sftp</para></listitem>
+                         <listitem><para>gvfsd-smb - mounts Windows Shares Filesystem volumes</para></listitem>
+Index: b/po/POTFILES.in
+===================================================================
+--- a/po/POTFILES.in
++++ b/po/POTFILES.in
+@@ -35,6 +35,7 @@
+ daemon/gvfsbackendmtp.c
+ daemon/gvfsbackendnetwork.c
+ daemon/gvfsbackendnfs.c
++daemon/gvfsbackendobexftp.c
+ daemon/gvfsbackendrecent.c
+ daemon/gvfsbackendsftp.c
+ daemon/gvfsbackendsmbbrowse.c

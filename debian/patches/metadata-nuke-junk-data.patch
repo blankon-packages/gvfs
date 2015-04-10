@@ -7,14 +7,15 @@ Subject: [PATCH] Nuke the metadata file if magic blob is wrong
  metadata/metatree.c |   12 +++++++++++-
  1 files changed, 11 insertions(+), 1 deletions(-)
 
+Index: b/metadata/metatree.c
+===================================================================
 --- a/metadata/metatree.c
 +++ b/metadata/metatree.c
-@@ -397,7 +397,17 @@
-   tree->header = (MetaFileHeader *)data;
- 
+@@ -420,7 +420,15 @@
    if (memcmp (tree->header->magic, MAGIC, MAGIC_LEN) != 0)
--    goto err;
-+    {
+     {
+       g_warning ("can't init metadata tree %s: wrong magic", tree->filename);
+-      goto err;
 +      if (!tree->for_write)
 +        goto err;
 +
@@ -24,7 +25,6 @@ Subject: [PATCH] Nuke the metadata file if magic blob is wrong
 +        goto err;
 +
 +      goto retry;
-+    }
+     }
  
    if (tree->header->major != MAJOR_VERSION)
-     goto err;
